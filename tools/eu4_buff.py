@@ -22,13 +22,13 @@
    - 玩家宣战或被宣战时，所有盟友像附庸一样直接加入战争，不需要对方同意、不消耗人情；
      宣战窗口里盟友和附庸一样显示为“强制参战”(不能取消)，并计入兵力对比。已被选作敌方共同交战国的除外。
    - 战争中用“召集参战”召集盟友仍照原版(要对方同意、消耗人情)。
-6. 恶性随机事件不进随机池：
+6. 随机池里只留有纯好处的事件：
    - 每次安装时读游戏目录和启用的 mod 的脚本(dlc_load.json)，找出随机触发的事件(on_actions 随机池、各 pulse、
-     平均触发时间)，判断每个选项是不是“只有坏处”(稳定度/威望/钱/点数下降、叛军、负面修正等，没有任何好处；
-     封装的脚本效果展开再算，接着触发别的事件的不算)。不写死事件清单，换 mod 也自动跟着变。
-   - 运行时随机池检查玩家的事件时，用引擎自己的选项条件判断玩家当下能选哪些选项：能选的全是“只有坏处”的，
-     这个事件对玩家判为不满足条件，不进随机池(不占权重)；有一个能选的选项有好处就照常。AI 不受影响。
-   - 会清除标记、结束事变/灾难等改流程状态的事件、隐藏事件、立即效果里有好处的事件不拦。
+     平均触发时间)，标出每个选项是不是“纯好处”(有好处且没有任何坏处；封装的脚本效果展开再算；接着触发别的
+     事件的不算，后续好坏未知；立即效果里有坏处的事件，所有选项都不算)。不写死事件清单，换 mod 也自动跟着变。
+   - 运行时随机池检查玩家的事件时，用引擎自己的选项条件判断玩家当下能选哪些选项：能选的选项里有纯好处的才进
+     随机池，否则对玩家判为不满足条件(不进池、不占权重)。AI 不受影响。
+   - 会清除标记、结束事变/灾难等改流程状态的事件、隐藏事件不拦(拦了可能卡住事变等流程)。
 7. 成就(对所有人生效)：装了 mod、改过的游戏/存档、非铁人模式也能获得成就。
    - 脚本触发器 ironman 恒按“是铁人”判断(成就条件里都写了 ironman = yes)，
      所以其他脚本里的 ironman 判断也会受影响。
@@ -459,7 +459,7 @@ CAVES = {
 # (名称, 特征码键, 挂钩处相对命中处的偏移, 被搬走的原指令长度, 机器码键, 数据区各项)
 # 数据区：glob = 游戏对象全局指针，dside = 战斗骰子面数(COMBAT_DICE_SIDE)，wipe = 原版全歼函数，
 #         direct = 召集循环里“盟友直接加入战争”的分支，
-#         @badev = 恶性事件表(安装时分析游戏和 mod 的脚本生成，写在补丁内存里)
+#         @badev = 随机事件表(安装时分析游戏和 mod 的脚本生成，写在补丁内存里)
 HOOKS = (
     ("战斗骰子(新阶段)", "LANDDICE1", 0x12, 6, "DICE14", ("glob", "dside")),
     ("战斗骰子(阶段内)", "LANDDICE2", 0x12, 8, "DICE14", ("glob", "dside")),
@@ -471,7 +471,7 @@ HOOKS = (
     ("盟友像附庸一样直接参战", "ALLYJOIN", 0x30, 5, "ALLYJOIN", ("glob", "direct")),
     ("参战方列表里盟友算强制参战", "ALLYFLAG", 0x1D, 5, "ALLYFLAG", ("glob",)),
     ("玩家部队无损耗", "ATTRITION", 0, 5, "ATTR", ("glob",)),
-    ("恶性随机事件不进玩家的随机池", "EVPOSSIBLE", 0, 5, "EVPOOL", ("glob", "@badev")),
+    ("玩家的随机池只留有纯好处的事件", "EVPOSSIBLE", 0, 5, "EVPOOL", ("glob", "@badev")),
 )
 
 
@@ -503,8 +503,8 @@ def fnv1a64(s):
 # ---------------------------------------------------------------------------
 # 读游戏目录 + dlc_load.json 里启用的 mod 的脚本(后加载的同名文件覆盖前面的)，找出随机触发的事件
 # (on_actions 的 random_events、各 pulse 的 events、平均触发时间)，对每个选项判断是否“只有坏处”。
-# 结果按事件标题键做成表：每个事件一项 {标题键哈希, 有好处的选项位图, 要在运行时检查可用性的选项位图}；
-# 运行时只看玩家当下能选的选项：能选的全是“只有坏处”的，这个事件就不进玩家的随机池。
+# 结果按事件标题键做成表：每个事件一项 {标题键哈希, 纯好处的选项位图, 要在运行时检查可用性的选项位图}；
+# 运行时只看玩家当下能选的选项：其中有纯好处的(有好处且没有任何坏处)才进玩家的随机池，否则不进。
 
 _PDX_TOK = re.compile(r'\s+|#[^\n]*|"(?:[^"\\]|\\.)*"|[{}]|[<>!]?=|[<>]|[^\s{}=<>#"]+', re.S)
 _PDX_OPS = ('=', '<', '>', '<=', '>=', '!=', '==')
@@ -613,8 +613,7 @@ _EFF_ALWAYS_BAD = {'kill_heir', 'kill_advisor', 'remove_advisor', 'kill_consort'
 _EFF_ALWAYS_GOOD = {'add_core', 'add_claim', 'add_permanent_claim', 'add_territorial_core', 'create_general',
                     'create_admiral', 'create_explorer', 'create_conquistador', 'define_advisor', 'add_building',
                     'add_great_project_tier', 'hire_advisor', 'add_cb', 'add_casus_belli', 'add_idea', 'add_heir',
-                    'define_heir', 'define_ruler', 'add_estate_privilege', 'set_estate_privilege', 'add_institution',
-                    'country_event', 'province_event'}  # 接着触发别的事件：后续可能有好处
+                    'define_heir', 'define_ruler', 'add_estate_privilege', 'set_estate_privilege', 'add_institution'}
 _EFF_MODIFIER = {'add_country_modifier', 'add_province_modifier', 'add_permanent_province_modifier',
                  'add_ruler_modifier', 'add_trade_modifier'}
 _EFF_SKIP = {'limit', 'trigger', 'ai_chance', 'name', 'tooltip', 'custom_tooltip', 'highlight', 'goto', 'modifier',
@@ -701,6 +700,13 @@ class EventAnalyzer:
         return False
 
     @staticmethod
+    def _has_key(block, keys):
+        for k, _, v in block:
+            if k in keys or (isinstance(v, list) and EventAnalyzer._has_key(v, keys)):
+                return True
+        return False
+
+    @staticmethod
     def _mentions(block, word):
         for k, _, v in block:
             if word in (k or '') or (isinstance(v, str) and word in v) or \
@@ -709,7 +715,7 @@ class EventAnalyzer:
         return False
 
     def analyze(self):
-        """返回 {标题键: (有好处的选项位图, 运行时检查可用性的选项位图)}，只含可能被拦的事件。"""
+        """返回 {标题键: (纯好处的选项位图, 运行时检查可用性的选项位图)}，只含可能被拦的事件。"""
         events = {}
         for f in merged_files(self.roots, 'events'):
             for k, _, v in pdx_parse(pdx_read(f)):
@@ -748,18 +754,17 @@ class EventAnalyzer:
             if any(isinstance(v, list) and self._touches_state(v)
                    for key in ('option', 'immediate', 'after') for v in d.get(key, [])):
                 continue
-            if any(isinstance(v, list) and self.score(v)[0] for v in d.get('immediate', [])):
-                continue
+            imm_bad = any(isinstance(v, list) and self.score(v)[1] for v in d.get('immediate', []))
             good = check = 0
             for n, o in enumerate(opts):
                 g, b = self.score(o)
-                if g or not b:
-                    good |= 1 << n  # 有好处或没有坏处
+                if g and not b and not imm_bad and not self._has_key(o, ('country_event', 'province_event')):
+                    good |= 1 << n  # 纯好处：有好处、没有坏处，也不接着触发别的事件(后续好坏未知)
                 trig = [v for k, _, v in o if k == 'trigger' and isinstance(v, list)]
                 if trig and not any(self._mentions(tb, 'event_target') for tb in trig):
                     check |= 1 << n  # 有选项条件：运行时问引擎能不能选(用到事件目标的当作能选)
             if good == (1 << len(opts)) - 1:
-                continue  # 每个选项都有好处，不可能被拦
+                continue  # 每个选项都是纯好处，不可能被拦
             prev = out.get(t)
             if prev is not None and prev != (good, check):
                 out[t] = None  # 同标题的事件选项不同，没法按标题区分
@@ -771,10 +776,10 @@ class EventAnalyzer:
 
 
 def blob_badev(game_dir):
-    """恶性事件表：数量 + 按哈希升序的 {标题键哈希, 有好处的选项位图, 检查可用性的选项位图}。"""
+    """随机事件表：数量 + 按哈希升序的 {标题键哈希, 纯好处的选项位图, 检查可用性的选项位图}。"""
     res = EventAnalyzer(content_roots(game_dir)).analyze()
     ent = sorted((fnv1a64(t), g, c) for t, (g, c) in res.items())
-    log(f"恶性事件分析：{len(ent)} 个随机事件可能被拦(运行时看玩家能选的选项)")
+    log(f"随机事件分析：{len(ent)} 个随机事件不一定有纯好处的选项(运行时看玩家能选的选项决定进不进随机池)")
     return struct.pack("<Q", len(ent)) + b"".join(struct.pack("<QQQ", *e) for e in ent)
 
 
