@@ -57,7 +57,6 @@ on_monthly_pulse = {
 		if = {
 			limit = { NOT = { employed_advisor = { category = ADM } } }
 			hire_advisor = { skill = 5 cost_multiplier = 0 type = natural_scientist }
-			create_general = { tradition = 100 }
 		}
 		if = {
 			limit = { NOT = { employed_advisor = { category = DIP } } }
@@ -68,41 +67,6 @@ on_monthly_pulse = {
 			limit = { NOT = { employed_advisor = { category = MIL } } }
 			hire_advisor = { skill = 5 cost_multiplier = 0 type = army_reformer }
 			create_general = { tradition = 100 }
-		}
-		if = {
-			limit = { adm_power = 999 }
-			add_adm_tech = 1 add_adm_power = -999
-		}
-		if = {
-			limit = { dip_power = 999 }
-			add_dip_tech = 1 add_dip_power = -999
-		}
-		if = {
-			limit = { mil_power = 999 }
-			add_mil_tech = 1 add_mil_power = -999
-		}
-	}
-}
-
-on_mil_development = {
-	if = { 
-		limit = { owned_by = event_target:player }
-		if = {
-			limit = { owner = { mil_tech = 7 } }
-			build_to_forcelimit = { infantry = 0.6 cavalry = 0.1 artillery = 0.3 }
-		}
-		else = {
-			build_to_forcelimit = { infantry = 0.8 cavalry = 0.2 }
-		}
-	}
-}
-
-on_dip_development = {
-	if = { 
-		limit = { owned_by = event_target:player }
-		if = {
-			limit = { has_port = yes }
-			build_to_forcelimit = { heavy_ship = 0.5 transport = 0.5 }
 		}
 	}
 }
@@ -126,7 +90,6 @@ on_battle_lost_province = {
 	if = { 
 		limit = { FROM = { ai = no } }
 		FROM = {
-			add_yearly_manpower = 1
 			add_war_exhaustion = -1
 			add_army_professionalism = 0.01
 		}
