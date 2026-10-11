@@ -738,41 +738,43 @@ class EventAnalyzer:
         for i, d in events.items():
             if 'mean_time_to_happen' in d and d.get('is_triggered_only', ['no'])[0] != 'yes':
                 rnd.add(i)
-        by_title, out = {}, {}
+        by_title = {}
         for i, d in events.items():
             t = d.get('title', [None])[0]
             if isinstance(t, str):
                 by_title.setdefault(t, []).append(i)
+        out = {}
         for i in rnd:
             d = events.get(i)
-            if not d or d.get('hidden', ['no'])[0] == 'yes':
+            t = d.get('title', [None])[0] if d else None
+            if not isinstance(t, str) or t in out:
                 continue
-            t = d.get('title', [None])[0]
-            opts = [o for o in d.get('option', []) if isinstance(o, list)]
-            if not isinstance(t, str) or not opts or len(opts) > 64:
-                continue
-            if any(isinstance(v, list) and self._touches_state(v)
-                   for key in ('option', 'immediate', 'after') for v in d.get(key, [])):
-                continue
-            imm_bad = any(isinstance(v, list) and self.score(v)[1] for v in d.get('immediate', []))
-            good = check = 0
-            for n, o in enumerate(opts):
-                g, b = self.score(o)
-                if g and not b and not imm_bad and not self._has_key(o, ('country_event', 'province_event')):
-                    good |= 1 << n  # 纯好处：有好处、没有坏处，也不接着触发别的事件(后续好坏未知)
-                trig = [v for k, _, v in o if k == 'trigger' and isinstance(v, list)]
-                if trig and not any(self._mentions(tb, 'event_target') for tb in trig):
-                    check |= 1 << n  # 有选项条件：运行时问引擎能不能选(用到事件目标的当作能选)
-            if good == (1 << len(opts)) - 1:
-                continue  # 每个选项都是纯好处，不可能被拦
-            prev = out.get(t)
-            if prev is not None and prev != (good, check):
-                out[t] = None  # 同标题的事件选项不同，没法按标题区分
-            else:
-                out[t] = (good, check)
-            if any(j not in rnd for j in by_title[t] if j != i):
-                out[t] = None  # 标题和非随机事件共用
-        return {t: v for t, v in out.items() if v}
+            # 按标题键识别：共用这个标题的事件(包括非随机的)判定结果都一样才能拦，否则区分不开就不拦
+            masks = {self._masks(events[j]) for j in by_title[t]}
+            m = masks.pop() if len(masks) == 1 else None
+            out[t] = m if m and m[0] != m[2] else None
+        return {t: (g, c) for t, v in out.items() if v for g, c, _ in [v]}
+
+    def _masks(self, d):
+        """(纯好处的选项位图, 检查可用性的选项位图, 全部选项位图)；不该拦的事件返回 None。"""
+        if d.get('hidden', ['no'])[0] == 'yes':
+            return None
+        opts = [o for o in d.get('option', []) if isinstance(o, list)]
+        if not opts or len(opts) > 64:
+            return None
+        if any(isinstance(v, list) and self._touches_state(v)
+               for key in ('option', 'immediate', 'after') for v in d.get(key, [])):
+            return None
+        imm_bad = any(isinstance(v, list) and self.score(v)[1] for v in d.get('immediate', []))
+        good = check = 0
+        for n, o in enumerate(opts):
+            g, b = self.score(o)
+            if g and not b and not imm_bad and not self._has_key(o, ('country_event', 'province_event')):
+                good |= 1 << n  # 纯好处：有好处、没有坏处，也不接着触发别的事件(后续好坏未知)
+            trig = [v for k, _, v in o if k == 'trigger' and isinstance(v, list)]
+            if trig and not any(self._mentions(tb, 'event_target') for tb in trig):
+                check |= 1 << n  # 有选项条件：运行时问引擎能不能选(用到事件目标的当作能选)
+        return good, check, (1 << len(opts)) - 1
 
 
 def blob_badev(game_dir):
