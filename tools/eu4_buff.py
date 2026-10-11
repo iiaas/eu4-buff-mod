@@ -22,6 +22,10 @@
    - 玩家宣战或被宣战时，所有盟友像附庸一样直接加入战争，不需要对方同意、不消耗人情；
      宣战窗口里盟友和附庸一样显示为“强制参战”(不能取消)，并计入兵力对比。已被选作敌方共同交战国的除外。
    - 战争中用“召集参战”召集盟友仍照原版(要对方同意、消耗人情)。
+6. 成就(对所有人生效)：装了 mod、改过的游戏/存档、非铁人模式也能获得成就。
+   - 脚本触发器 ironman 恒按“是铁人”判断(成就条件里都写了 ironman = yes)，
+     所以其他脚本里的 ironman 判断也会受影响。
+   - 难度、AI 难度、幸运国家、开局设置、多人游戏、指定国家等其他成就条件不变。
 
 兼容性
 ------
@@ -293,6 +297,26 @@ SIGS = {
         "48 8B 85 50 03 00 00 48 8B 40 10 C7 44 24 60 01 00 00 00 48 89 44 24 64 C6 44 24 6C 00 0F 28 44 "
         "24 60 66 0F 7F 45 70 45 33 C0 48 8B 44 24 30 48 8B 90 B8 19 00 00"
     ),
+    # 成就：比较存档校验和，结果写到成就管理器 +1(存档校验通过)
+    "ACHSAVE": "49 3B DC 75 ?? 4C 8B C3 E8 ?? ?? ?? ?? 85 C0 75 ?? B3 01 EB ?? 32 DB 41 88 5F 01",
+    # 成就：设置成就管理器 +2(游戏未修改)
+    "ACHMOD": (
+        "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B 05 ?? ?? ?? ?? 0F B6 FA 48 8B F1 4C 8B 80 48 "
+        "03 00 00 49 8B 58 30 48 85 DB 74 ?? 48 8B 03 48 8B CB FF 50 18 48 8B 03 48 8B CB FF 50 30 40 88 "
+        "7E 02 48 8B 5C 24 30 48 8B 74 24 38 48 83 C4 20 5F C3 48 8B 5C 24 30 48 8B 74 24 38 40 88 79 02"
+    ),
+    # 成就：能否获得成就的判断里，铁人检查(游戏信息 +9)
+    "ACHIRON1": (
+        "40 38 7A 14 0F 84 ?? ?? ?? ?? 40 38 7E 02 0F 84 ?? ?? ?? ?? 45 84 C9 75 ?? 40 38 7A 09 0F 84 ?? "
+        "?? ?? ??"
+    ),
+    # 成就：列出不能获得成就的原因时，“不是铁人”那一条
+    "ACHIRON2": "45 32 FF 4D 85 F6 0F 84 ?? ?? ?? ?? 40 38 7A 09 0F 85 ?? ?? ?? ??",
+    # 脚本触发器 ironman 的求值函数(比较游戏铁人标志 +0x24D0 和触发器的值 +0x68)
+    "ACHTRIG": (
+        "48 8B 05 ?? ?? ?? ?? 80 B8 DB 74 00 00 00 74 ?? B0 01 C3 0F B6 80 D0 24 00 00 38 41 68 0F 94 C0 "
+        "C3"
+    ),
 }
 
 CAVES = {
@@ -389,6 +413,22 @@ HOOKS = (
 )
 
 
+# 直接改写(不需要机器码)：(名称, 特征码键, 改写处相对命中处的偏移, 原字节, 新字节)
+DIRECT = (
+    # 比较存档校验和：不一致时把“存档校验通过”设为否(xor bl,bl)，改成 mov bl,1
+    ("成就:存档校验恒通过", "ACHSAVE", 0x15, "32db", "b301"),
+    # 设置“游戏未修改”标志(mov [reg+2],dil)，改成恒存 1：装 mod 也算未修改
+    ("成就:游戏未修改(有 mod)", "ACHMOD", 0x3E, "40887e02", "c6460201"),
+    ("成就:游戏未修改(有 mod)2", "ACHMOD", 0x5C, "40887902", "c6410201"),
+    # 能否获得成就：不是铁人就判否的 je，改成空操作
+    ("成就:非铁人也可以", "ACHIRON1", 0x1D, "0f84dc000000", "909090909090"),
+    # 列出不能获得成就的原因时，“不是铁人”那一条的 jne 改成必跳过
+    ("成就:不提示非铁人", "ACHIRON2", 0x10, "0f85c2000000", "90e9c2000000"),
+    # 脚本触发器 ironman 的求值：读游戏的铁人标志(movzx eax, byte [rax+0x24D0])改成 mov eax,1
+    ("成就:ironman 触发器恒为是", "ACHTRIG", 0x13, "0fb680d0240000", "b8010000009090"),
+)
+
+
 def rel_target(img, insn_rva, disp_off, insn_len):
     return insn_rva + insn_len + struct.unpack("<i", img.bytes_at(insn_rva + disp_off, 4))[0]
 
@@ -414,6 +454,12 @@ def resolve(img):
             problems.append(f"{name}: 特征码{'未命中' if not hits else '命中 %d 处(不唯一)' % len(hits)}")
             continue
         R["entry:" + name] = hits[0] + off
+    for name, sk, off, old, new in DIRECT:
+        hits = img.find_sig(SIGS[sk])
+        if len(hits) == 1 and img.bytes_at(hits[0] + off, len(old) // 2) == bytes.fromhex(old):
+            R["entry:" + name] = hits[0] + off
+        else:
+            problems.append(f"{name}: 特征码{'未命中或原字节不符' if len(hits) <= 1 else '命中 %d 处(不唯一)' % len(hits)}")
     # 原版全歼函数：战斗结束结算里兵力悬殊时调用的那个
     e = R.get("entry:玩家打赢陆战即全歼")
     if e is not None and img.bytes_at(e + 0x162, 1) == b"\xE8":
@@ -432,6 +478,18 @@ def resolve(img):
 def install_all(h, base, img):
     R, problems = resolve(img)
     out = [("特征码问题", p) for p in problems]
+    for name, sk, off, old, new in DIRECT:
+        entry = R.get("entry:" + name)
+        if entry is None:
+            out.append((name, "特征码未命中，跳过"))
+            continue
+        cur = P.read_mem(h, base + entry, len(old) // 2)
+        if cur == bytes.fromhex(new):
+            out.append((name, "已存在"))
+        elif cur != bytes.fromhex(old):
+            out.append((name, "进程内指令与文件不符，跳过"))
+        else:
+            out.append((name, "安装成功" if P.patch_code(h, base + entry, bytes.fromhex(new)) else "写入失败"))
     todo = []
     for name, sk, off, pro_len, cave, keys in HOOKS:
         entry = R.get("entry:" + name)
@@ -474,6 +532,10 @@ def install_all(h, base, img):
 def remove_all(h, base, img):
     R, _ = resolve(img)
     n = 0
+    for name, sk, off, old, new in DIRECT:
+        entry = R.get("entry:" + name)
+        if entry is not None and P.read_mem(h, base + entry, len(new) // 2) == bytes.fromhex(new):
+            n += P.patch_code(h, base + entry, bytes.fromhex(old))
     for name, sk, off, pro_len, *_r in HOOKS:
         entry = R.get("entry:" + name)
         if entry is None:
@@ -522,7 +584,7 @@ def main():
         h, base, img, pid = a
         if args.status:
             R, problems = resolve(img)
-            for name, *_ in HOOKS:
+            for name, *_ in HOOKS + DIRECT:
                 log(f"{name}: {'RVA 0x%X' % R['entry:' + name] if 'entry:' + name in R else '未定位'}")
             for k in ("glob", "dside", "wipe", "direct"):
                 log(f"{k}: {'0x%X' % R[k] if k in R else '未找到'}")
