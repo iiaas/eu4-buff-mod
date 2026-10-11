@@ -22,9 +22,13 @@
    - 玩家宣战或被宣战时，所有盟友像附庸一样直接加入战争，不需要对方同意、不消耗人情；
      宣战窗口里盟友和附庸一样显示为“强制参战”(不能取消)，并计入兵力对比。已被选作敌方共同交战国的除外。
    - 战争中用“召集参战”召集盟友仍照原版(要对方同意、消耗人情)。
-6. 恶性随机事件不进随机池：随机触发的事件里，每个选项都只有坏处的(稳定度/威望/钱/点数下降、叛军、
-   负面修正等)且没有任何好处的，对玩家判为“不满足触发条件”，所以不会进入随机事件池参与抽取(也不占权重)，平均触发时间的
-   事件也不会触发；AI 照常。清单见下面的 BAD_EVENTS(脚本静态分析得出，约 580 个)。
+6. 恶性随机事件不进随机池：
+   - 每次安装时读游戏目录和启用的 mod 的脚本(dlc_load.json)，找出随机触发的事件(on_actions 随机池、各 pulse、
+     平均触发时间)，判断每个选项是不是“只有坏处”(稳定度/威望/钱/点数下降、叛军、负面修正等，没有任何好处；
+     封装的脚本效果展开再算，接着触发别的事件的不算)。不写死事件清单，换 mod 也自动跟着变。
+   - 运行时随机池检查玩家的事件时，用引擎自己的选项条件判断玩家当下能选哪些选项：能选的全是“只有坏处”的，
+     这个事件对玩家判为不满足条件，不进随机池(不占权重)；有一个能选的选项有好处就照常。AI 不受影响。
+   - 会清除标记、结束事变/灾难等改流程状态的事件、隐藏事件、立即效果里有好处的事件不拦。
 7. 成就(对所有人生效)：装了 mod、改过的游戏/存档、非铁人模式也能获得成就。
    - 脚本触发器 ironman 恒按“是铁人”判断(成就条件里都写了 ironman = yes)，
      所以其他脚本里的 ironman 判断也会受影响。
@@ -46,6 +50,7 @@
 """
 import argparse
 import ctypes
+import json
 import os
 import re
 import struct
@@ -205,6 +210,7 @@ class Image:
     """从磁盘上的 eu4.exe 读取(始终是未打补丁的原始代码)。"""
 
     def __init__(self, path):
+        self.path = Path(path)
         d = self.data = Path(path).read_bytes()
         pe = struct.unpack_from("<I", d, 0x3C)[0]
         nsec = struct.unpack_from("<H", d, pe + 6)[0]
@@ -433,23 +439,27 @@ CAVES = {
         "440fb7d2c34889d148c1e93884c9740948c1ea20664439d2c380c901c3"
     ),
     "EVPOOL": (
-        "000000000000000000000000000000005051524150415141524153e81d0100004983faff0f84060100004c8b4c"
-        "24204d85c90f84f8000000498d412c4180794b007404498d4144488b104889d148c1e93884c975354963412848"
-        "85c00f88ce0000004869c0102e0000488b0d90ffffff488b094885c90f84b4000000480381a81c0000488b9068"
-        "040000e8040100000f859b0000004c8b4c24284d85c90f848d0000004981c1e00700004d8b59104d85db747d49"
-        "81fb000100007774498379181072034d8b0948b825232284e49cf2cb48b9b301000000010000410fb6114831d0"
-        "480fafc149ffc149ffcb75ed4c8b0d14ffffff4d85c974374d8b194531d24d39da732c4b8d0c1a48d1e9498b54"
-        "c9084839c2740d72054989cbebe34c8d5101ebdd415b415a415941585a595831c0c3415b415a415941585a5958"
-        "eb6e49c7c2ffffffff488b05b5feffff488b004885c0743f488b90601e000080b8661e000007751080b86f1e00"
-        "00007407488b90681e00004889d148c1e93884c974144889d148c1e93080f907740848c1ea20440fb7d2c34889"
-        "d148c1e93884c9740948c1ea20664439d2c380c901c3"
+        "0000000000000000000000000000000053565755415441554156415751524883ec284989cc4989d5e8d3010000"
+        "4983faff0f84b50100004d85ed0f84ac010000498d452c41807d4b007404498d4544488b104889d148c1e93884"
+        "c97535496345284885c00f88820100004869c0102e0000488b0d88ffffff488b094885c90f8468010000480381"
+        "a81c0000488b9068040000e8bf0100000f854f0100004d85e40f84460100004d8d8c24e00700004d8b59104d85"
+        "db0f84310100004981fb000100000f8724010000498379181072034d8b0948b825232284e49cf2cb48b9b30100"
+        "0000010000410fb6114831d0480fafc149ffc149ffcb75ed4c8b0d08ffffff4d85c90f84e30000004d8b194531"
+        "d24d39da0f83d40000004b8d0c1a48d1e9488d1449498b54d1084839c2740d72054989cbebdb4c8d5101ebd548"
+        "8d0449498d44c1084c8b7808488b5810498bb42490070000498bbc24980700004829f748c1ff034883ff400f87"
+        "800000004531f64531e44939fe735b4a8b04f64885c0744d4c0fa3f3733b486388bc000000488ba8b000000048"
+        "8d4ccd0048894c2420483b6c2420731c488b4d004885c9740d4c89ea488b01ff503084c074124883c508ebdd4d"
+        "0fa3f7722541bc0100000049ffc6eba04585e474154883c4285a59415f415e415d415c5d5f5e5b31c0c34883c4"
+        "285a59415f415e415d415c5d5f5e5beb6e49c7c2ffffffff488b05f2fdffff488b004885c0743f488b90601e00"
+        "0080b8661e000007751080b86f1e0000007407488b90681e00004889d148c1e93884c974144889d148c1e93080"
+        "f907740848c1ea20440fb7d2c34889d148c1e93884c9740948c1ea20664439d2c380c901c3"
     ),
 }
 
 # (名称, 特征码键, 挂钩处相对命中处的偏移, 被搬走的原指令长度, 机器码键, 数据区各项)
 # 数据区：glob = 游戏对象全局指针，dside = 战斗骰子面数(COMBAT_DICE_SIDE)，wipe = 原版全歼函数，
 #         direct = 召集循环里“盟友直接加入战争”的分支，
-#         @badev = 恶性事件标题的哈希表(安装时由 BAD_EVENTS 生成，写在补丁内存里)
+#         @badev = 恶性事件表(安装时分析游戏和 mod 的脚本生成，写在补丁内存里)
 HOOKS = (
     ("战斗骰子(新阶段)", "LANDDICE1", 0x12, 6, "DICE14", ("glob", "dside")),
     ("战斗骰子(阶段内)", "LANDDICE2", 0x12, 8, "DICE14", ("glob", "dside")),
@@ -481,597 +491,6 @@ DIRECT = (
 )
 
 
-# 恶性随机事件：(事件 ID, 标题键, 汉化标题)。按标题键识别(引擎里事件对象只存了标题键，数字 ID 要到运行时才定)。
-# 由脚本分析生成：原版 + 已启用 mod 里随机触发(on_actions 的 random_events、各 pulse 的 events、平均触发时间)
-# 的事件中，每个选项都只有坏处(没有任何好处)的；封装的脚本效果展开后再判断，不认识的数值效果按方向算，
-# 选项会接着触发别的事件的不算(后续可能有好处)；会清除标记、结束事变/灾难等改流程状态的事件和隐藏事件不算；
-# 标题键和非恶性事件共用的也不算。想放行某个事件，删掉对应一行即可。
-BAD_EVENTS = (
-    ('1022', 'EVTNAME1022', '贸易控制'),
-    ('anglican_events.15', 'anglican_events.15.t', '不遵奉国教的君主'),
-    ('anglican_events.5', 'anglican_events.5.t', '马普雷拉特宣传册'),
-    ('anglican_events.6', 'anglican_events.6.t', '祈祷书叛乱'),
-    ('aow_events.1', 'aow_events.1.t', '的困境'),
-    ('aow_events.11', 'aow_events.11.t', '瘟疫蔓延'),
-    ('aow_events.15', 'aow_events.15.t', '留守的家庭'),
-    ('aow_events.19', 'aow_events.19.t', '一个令人高度不安的指责'),
-    ('aow_events.27', 'aow_events.27.t', '的信徒叛变了！'),
-    ('aow_events.28', 'aow_events.28.t', '内外交困'),
-    ('army_professionalism_events.12', 'army_professionalism_events.12.t', '缺少军官'),
-    ('army_professionalism_events.4', 'army_professionalism_events.4.t', '延迟发薪'),
-    ('army_professionalism_events.9', 'army_professionalism_events.9.t', '私人承包商'),
-    ('buddhism_events.17', 'buddhism_events.17.t', '施舍之德'),
-    ('buddhism_events.27', 'buddhism_events.27.t', '强盗首领归来'),
-    ('buddhism_events.28', 'buddhism_events.28.t', '神话依然存在'),
-    ('buddhism_events.3', 'buddhism_events.3.t', '僧人破戒'),
-    ('buddhism_events.35', 'buddhism_events.35.t', '萨满教僧侣'),
-    ('buddhism_events.4', 'buddhism_events.4.t', '僧院支持篡位者'),
-    ('buddhism_events.5', 'buddhism_events.5.t', '的先例'),
-    ('canal_events.23', 'canal_events.EVTNAME23', '运河与河流交会'),
-    ('central_african.7', 'central_african.7.t', '姆布迪埃与发生冲突'),
-    ('china_events.10', 'china_events.10.t', '宦官的恶习'),
-    ('china_events.18', 'china_events.18.t', '鞭笞下人'),
-    ('china_events.19', 'china_events.19.t', '河运闹剧'),
-    ('china_events.21', 'china_events.21.t', '金银外流'),
-    ('china_events.23', 'china_events.23.t', '边疆豪杰'),
-    ('china_events.34', 'china_events.34.t', '文房四宝'),
-    ('china_events.38', 'china_events.38.t', '科举舞弊'),
-    ('china_events.46', 'china_events.46.t', '洪水泛滥'),
-    ('china_events.47', 'china_events.47.t', '丝绸之路上的强盗'),
-    ('china_events.48', 'china_events.48.t', '长廊旁的阴影'),
-    ('china_events.49', 'china_events.49.t', '日食凶兆'),
-    ('china_events.50', 'china_events.50.t', '不忠的官僚'),
-    ('china_events.52', 'china_events.52.t', '瘟疫来袭'),
-    ('china_events.53', 'china_events.53.t', '暗夜刀锋'),
-    ('china_events.54', 'china_events.54.t', '嫔妃之子'),
-    ('china_events.56', 'china_events.56.t', '悲观的见解'),
-    ('china_events.58', 'china_events.58.t', '大学士对月呼号'),
-    ('china_events.59', 'china_events.59.t', '运漕银的船沉了'),
-    ('china_events.60', 'china_events.60.t', '假传圣旨'),
-    ('china_events.8', 'china_events.8.t', '监守自盗的司库'),
-    ('colonial.11', 'colonial.EVTNAME11', '防御是折中方案'),
-    ('colonial.15', 'colonial.EVTNAME15', '我们的殖民地遭受了罗马热病的冲击！'),
-    ('colonial.3', 'EVTNAME1421', '布道士煽动'),
-    ('conquest_of_paradise.300', 'colonial_nation.EVTNAME300', '禁止毛皮贸易'),
-    ('conquest_of_paradise.301', 'colonial_nation.EVTNAME301', '年的收成'),
-    ('colonial_nation.182', 'colonial_nation.182.t', '腐败的总督'),
-    ('colonial_nation.185', 'colonial_nation.185.t', '废除王室特许状'),
-    ('colonial_nation.190', 'colonial_nation.190.t', '擅离职守的'),
-    ('consort_events.315', 'consort_events.315.t', '王室私生子'),
-    ('consort_events.53', 'consort_events.53.t', '国家事务'),
-    ('corruption_event.11', 'corruption_event.11.t', '「失踪」'),
-    ('corruption_event.12', 'corruption_event.12.t', '腐败的陆军将领'),
-    ('corruption_event.13', 'corruption_event.13.t', '腐败的海军将领'),
-    ('corruption_event.14', 'corruption_event.14.t', '外国商人不信任我们'),
-    ('corruption_event.15', 'corruption_event.15.t', '政府机能崩溃'),
-    ('corruption_event.16', 'corruption_event.16.t', '佣兵勒索当地民众'),
-    ('corruption_event.17', 'corruption_event.17.t', '不称职的行政官员'),
-    ('corruption_event.18', 'corruption_event.18.t', '过度扩张'),
-    ('corruption_event.19', 'corruption_event.19.t', '与腐败关联'),
-    ('corruption_event.20', 'corruption_event.20.t', '贿赂泛滥'),
-    ('corruption_event.5', 'corruption_event.5.t', '清正廉洁'),
-    ('corruption_event.6', 'corruption_event.6.t', '腐败的税吏'),
-    ('corruption_event.9', 'corruption_event.9.t', '群体不信任我们'),
-    ('cultural_event.2', 'cultural_event.2.t', '自由，平等，博爱'),
-    ('cultural_event.6', 'cultural_event.6.t', '特许成立圣路加公会'),
-    ('3051', 'EVTNAME3051', '文化动荡'),
-    ('culture_religion_events.17', 'culture_religion_events.17.t', '人日渐焦虑'),
-    ('dotf.7', 'dotf.7.t', '教会堡垒'),
-    ('devotion_events.117', 'devotion_events.117.t', '征用改革宗教堂'),
-    ('devotion_events.119', 'devotion_events.119.t', '马头酒馆谣言'),
-    ('devotion_events.15', 'devotion_events.15.t', '统治遭受挑战'),
-    ('devotion_events.17', 'devotion_events.17.t', '与的宿怨'),
-    ('devotion_events.2', 'devotion_events.2.t', '要塞维护'),
-    ('devotion_events.207', 'devotion_events.207.t', '腐败的官员'),
-    ('devotion_events.209', 'devotion_events.209.t', '反对腐败的政变'),
-    ('devotion_events.212', 'devotion_events.212.t', '长老会的失信'),
-    ('devotion_events.213', 'devotion_events.213.t', '顾问被控以物配主'),
-    ('devotion_events.218', 'devotion_events.218.t', '财产纠纷'),
-    ('devotion_events.22', 'devotion_events.22.t', '衰落的统治'),
-    ('devotion_events.23', 'devotion_events.23.t', '的腐败'),
-    ('devotion_events.3', 'devotion_events.3.t', '要塞的现代化'),
-    ('devotion_events.4', 'devotion_events.4.t', '过高的税收'),
-    ('9008', 'EVTNAME9008', '与吉利支丹关系紧张'),
-    ('9014', 'EVTNAME9014', '的踏绘'),
-    ('9050', 'EVTNAME9050', '大米歉收'),
-    ('dutch_republic.10', 'dutch_republic.10.t', '背弃共和'),
-    ('dutch_republic.21', 'dutch_republic.21.t', '意见分歧'),
-    ('dutch_republic.24', 'dutch_republic.24.t', '议会派希望维持现状'),
-    ('dutch_republic.26', 'dutch_republic.26.t', '的利益'),
-    ('dutch_republic.27', 'dutch_republic.27.t', '关注边界'),
-    ('9452', 'EVTNAME9452', '宫廷政变'),
-    ('9459', 'EVTNAME9459', '打猎事故'),
-    ('9460', 'EVTNAME9460', '家族秘密？'),
-    ('9462', 'EVTNAME9462', '狡猾的官僚'),
-    ('elective_monarchy.2', 'elective_monarchy.2.t', '国会反对 '),
-    ('1071', 'EVTNAME1071', '国力下滑'),
-    ('1073', 'EVTNAME1073', '国家分裂'),
-    ('1076', 'EVTNAME1076', '开拓殖民地'),
-    ('espionage_events.8', 'espionage_events.8.t', '怀疑邻国'),
-    ('exploration_events.12', 'exploration_events.12.t', '醉酒的探险家'),
-    ('exploration_events.15', 'exploration_events.15.t', '死神来了'),
-    ('exploration_events.6', 'exploration_events.6.t', '不受欢迎的乘客'),
-    ('exploration_events.7', 'exploration_events.7.t', '的绿色山峦'),
-    ('extended_regency_events.5', 'extended_regency_events.5.t', '寻宝'),
-    ('fetishist_flavor.131', 'fetishist_flavor.131.t', '照料先逝之人'),
-    ('fetishist_flavor.132', 'fetishist_flavor.132.t', '被质疑的统治者'),
-    ('fetishist_flavor.152', 'fetishist_flavor.152.t', '姆瓦里的愤怒'),
-    ('fetishist_flavor.153', 'fetishist_flavor.153.t', '的信仰'),
-    ('fetishist_flavor.174', 'fetishist_flavor.174.t', '不好的预兆'),
-    ('fetishist_flavor.420', 'fetishist_flavor.420.t', '亵渎安息日戒律'),
-    ('fetishist_flavor.457', 'fetishist_flavor.457.t', '的宗教对峙'),
-    ('fetishist_flavor.511', 'fetishist_flavor.511.t', '圣文'),
-    ('flavor_bur.14', 'flavor_bur.EVTNAME14', '沙罗勒伯爵与《血腥敕令》'),
-    ('flavor_bur.15', 'flavor_bur.EVTNAME15', '马孔伯爵与阿拉斯联盟'),
-    ('flavor_eng.9113', 'flavor_eng.EVTNAME9113', '珍·格蕾'),
-    ('flavor_eng.9122', 'flavor_eng.EVTNAME9122', '休·奥尼尔的爱尔兰叛乱'),
-    ('flavor_eng.9129', 'flavor_eng.EVTNAME9129', '宗教放任敕令和宗教审查法案'),
-    ('flavor_eng.9139', 'flavor_eng.EVTNAME9139', '詹姆斯党叛乱'),
-    ('flavor_eng.9143', 'flavor_eng.EVTNAME9143', '詹姆斯党叛乱'),
-    ('flavor_eng.9250', 'flavor_eng.EVTNAME9250', '缺少继承人'),
-    ('flavor_fra.3119', 'flavor_fra.EVTNAME3119', '贝亚恩的新教徒起义'),
-    ('flavor_fra.3122', 'flavor_fra.EVTNAME3122', '投石党动乱'),
-    ('flavor_geo.6', 'flavor_geo.6.t', '萨姆茨赫骚乱'),
-    ('flavor_geo.7', 'flavor_geo.7.t', '德米特里乌斯的野心'),
-    ('flavor_hab.13', 'flavor_hab.13.t', '维也纳瘟疫'),
-    ('flavor_hab.3194', 'flavor_hab.EVTNAME3194', '布拉格抛出窗外事件'),
-    ('flavor_hab.3195', 'flavor_hab.EVTNAME3195', '奥地利农民起义'),
-    ('flavor_per.10', 'flavor_per.10.t', '穆沙沙教团的兴起'),
-    ('flavor_per.11', 'flavor_per.11.t', '萨法维教团的兴起'),
-    ('flavor_per.6', 'flavor_per.EVTNAME6', '阿富汗叛乱'),
-    ('flavor_por.3273', 'flavor_por.EVTNAME3273', '流行性瘟疫'),
-    ('flavor_por.3278', 'flavor_por.EVTNAME3278', '地震摧毁里斯本'),
-    ('flavor_por.3280', 'flavor_por.EVTNAME3280', '塔沃拉家族阴谋'),
-    ('flavor_rus.27', 'flavor_rus.EVTNAME3435', '普加乔夫起义'),
-    ('flavor_rus.306', 'flavor_rus.306.t', '《会议法典》'),
-    ('flavor_rus.308', 'flavor_rus.308.t', '大起义！'),
-    ('flavor_rus.350', 'flavor_rus.350.t', '农民的命运'),
-    ('flavor_spa.3155', 'flavor_spa.EVTNAME3155', '平民社团起义'),
-    ('flavor_spa.3158', 'flavor_spa.EVTNAME3158', '国家破产'),
-    ('flavor_spa.3164', 'flavor_spa.EVTNAME3164', '国家破产'),
-    ('flavor_spa.3165', 'flavor_spa.EVTNAME3165', '流行性瘟疫'),
-    ('flavor_spa.3168', 'flavor_spa.EVTNAME3168', '葡萄牙民族起义'),
-    ('flavor_spa.3169', 'flavor_spa.EVTNAME3169', '伊比利亚的叛乱'),
-    ('flavor_spa.3170', 'flavor_spa.EVTNAME3170', '意大利人起义'),
-    ('flavor_spa.4', 'flavor_spa.4.t', '统一西班牙'),
-    ('flavor_swe.1628', 'flavor_swe.EVTNAME1628', '瓦萨号的沉没'),
-    ('flavor_swe.1743', 'flavor_swe.EVTNAME1743', '达拉纳大叛乱'),
-    ('flavor_swe.3240', 'flavor_swe.EVTNAME3240', '德·拉·加迪摄政'),
-    ('flavor_tur.101', 'flavor_tur.EVTNAME101', '耶尼切里和拜克塔什教团'),
-    ('flavor_tur.111', 'flavor_tur.EVTNAME111', '耶尼切里讨薪'),
-    ('flavor_tur.275', 'flavor_tur.275.t', '奇兹尔巴什起义'),
-    ('flavor_tur.276', 'flavor_tur.276.t', '沙赫库卢起义'),
-    ('flavor_tur.285', 'flavor_tur.285.t', '糟糕的经济政策'),
-    ('flavor_tur.3368', 'flavor_tur.EVTNAME3368', '杰姆苏丹的叛乱'),
-    ('flavor_tur.3395', 'flavor_tur.EVTNAME3395', '安纳托利亚瘟疫流行'),
-    ('flavor_ven.20', 'flavor_ven.20.t', '威尼斯的瘟疫'),
-    ('flavor_ven.27', 'flavor_ven.27.t', '巴尔纳伯贵族'),
-    ('flavor_ven.30', 'flavor_ven.30.t', '年大瘟疫'),
-    ('harem_events.22', 'harem_events.22.t', '和王子们'),
-    ('harem_events.23', 'harem_events.23.t', '扮演国王的游戏'),
-    ('harem_events.5', 'harem_events.5.t', '谋夺大位'),
-    ('harem_events.7', 'harem_events.7.t', '恐惧丝绫赐死'),
-    ('hindu_events.50', 'hindu_events.50.t', '上师的冥想'),
-    ('4043', 'EVTNAME4043', '贸易亏损'),
-    ('4044', 'EVTNAME4043', '贸易亏损'),
-    ('industrialization_events.17', 'industrialization_events.17.t', '对新的生产技术的敌意'),
-    ('industrialization_events.18', 'industrialization_events.18.t', '穷困的工匠'),
-    ('industrialization_events.19', 'industrialization_events.19.t', '疾病在传播'),
-    ('industrialization_events.20', 'industrialization_events.20.t', '发生矿难'),
-    ('industrialization_events.21', 'industrialization_events.21.t', '失火'),
-    ('innovativeness_events.1', 'innovativeness_events.1.t', '新闻自由'),
-    ('764', 'EVTNAME764', '失去永久教宗使节的头衔'),
-    ('mamluk_events.3', 'mamluk_events.3.t', '埃米尔的叛乱'),
-    ('mamluk_events.8', 'mamluk_events.8.t', '朝觐队伍受到袭击'),
-    ('maya_religion_events.1', 'maya_religion_events.1.t', '滋养众神'),
-    ('maya_religion_events.11', 'maya_religion_events.11.t', '梦魇'),
-    ('maya_religion_events.4', 'maya_religion_events.4.t', '创造和毁灭的周期'),
-    ('mercs.1', 'mercs.1.t', '普遍不满'),
-    ('mercs.11', 'mercs.11.t', '拖欠的薪水'),
-    ('mercs.3', 'mercs.3.t', '劫掠抵薪'),
-    ('meritocracy_events.4', 'meritocracy_events.4.t', '科举制度的衰败'),
-    ('expel_minority_events.5', 'expel_minority_events.5.t', '罢免行政官员'),
-    ('2065', 'EVTNAME2065', '宗教危机'),
-    ('monsoon_events.1', 'monsoon_events.1.t', '遭遇极端雨季'),
-    ('monsoon_events.2', 'monsoon_events.2.t', '的雨季未如期而至'),
-    ('monsoon_events.4', 'monsoon_events.4.t', '饥荒'),
-    ('muslim_dlc.27', 'muslim_dlc.EVTNAME27', '什叶对逊尼'),
-    ('muslim_dlc.28', 'muslim_dlc.EVTNAME28', '逊尼对什叶'),
-    ('muslim_piety.20', 'muslim_piety.20.t', '一个新的'),
-    ('muslim_school_events.10', 'muslim_school_events.10.t', '宗教学者的分歧'),
-    ('muslim_school_events.15', 'muslim_school_events.15.t', '城'),
-    ('nahuatl_events.11', 'nahuatl_events.11.t', '流浪的巫师'),
-    ('nahuatl_events.15', 'nahuatl_events.15.t', '乡间的巫师回来了'),
-    ('nahuatl_events.16', 'nahuatl_events.16.t', '西瓦泰泰奥'),
-    ('nahuatl_events.18', 'nahuatl_events.18.t', '橡胶足球球赛'),
-    ('nahuatl_events.6', 'nahuatl_events.6.t', '身膏烈日'),
-    ('nahuatl_events.7', 'nahuatl_events.7.t', '汝非生此隅……'),
-    ('native_americans.3', 'native_americans.3.t', '我们在北方的新家'),
-    ('native_americans.30', 'native_americans.30.t', '耻辱柱'),
-    ('native_americans.33', 'native_americans.33.t', '失踪的动物'),
-    ('native_americans.34', 'native_americans.34.t', '鹰扬'),
-    ('native_americans.38', 'native_americans.38.t', '橡子稀缺'),
-    ('native_americans.4', 'native_americans.4.t', '我们在沙漠的新家'),
-    ('native_federations_event.5', 'native_federations_event.5.t', '联盟面临的问题'),
-    ('norse_events.7', 'norse_events.7.t', '诺斯信仰觉醒'),
-    ('order_events.2', 'order_events.2.t', '女巫之锤'),
-    ('overextension.1', 'EVTNAME748', '部队逃亡'),
-    ('overextension.10', 'EVTNAME756', '顾问辞去'),
-    ('overextension.2', 'EVTNAME749', '普遍的敌对'),
-    ('overextension.3', 'EVTNAME750', '败坏名声！'),
-    ('overextension.4', 'EVTNAME751', '通货膨胀'),
-    ('overextension.5', 'EVTNAME752', '军官逃亡'),
-    ('overextension.6', 'EVTNAME753', '商人的愤怒'),
-    ('overextension.8', 'EVTNAME754', '正统性问题'),
-    ('overextension.9', 'EVTNAME755', '事务官辞职'),
-    ('1084', 'EVTNAME1084', '可能的渗入者'),
-    ('parlaments.2', 'parlaments.2.t', '腐败选区'),
-    ('parlaments.23', 'parlaments.23.t', '要求代表权'),
-    ('parlaments.25', 'parlaments.25.t', '来自人的要求'),
-    ('parlaments.3', 'parlaments.2.t', '腐败选区'),
-    ('promoting_art_events.3', 'promoting_art_events.3.t', '艺术家要求额外的资金'),
-    ('promoting_art_events.7', 'promoting_art_events.7.t', '艺术家要求额外的资源'),
-    ('personality_events.31', 'personality_events.31.t', '严守成规'),
-    ('personality_events.40', 'personality_events.40.t', '严格的礼仪'),
-    ('personality_events.56', 'personality_events.56.t', '咨询顾问'),
-    ('pirates.17', 'pirates.17.t', '走私者苦苦挣扎'),
-    ('pirates.19', 'pirates.19.t', '船员被列入黑名单'),
-    ('polynesian.1', 'polynesian.1.t', '圣地需要清理'),
-    ('polynesian.10', 'polynesian.10.t', '甜蜜的威胁'),
-    ('polynesian.2', 'polynesian.2.t', '舞蹈出错'),
-    ('polynesian.24', 'polynesian.24.t', '火山爆发'),
-    ('polynesian.27', 'polynesian.27.t', '凯提阿基塔雅'),
-    ('polynesian.3', 'polynesian.3.t', '拂尘不见了'),
-    ('polynesian.32', 'polynesian.32.t', '怯懦的继承人'),
-    ('polynesian.40', 'polynesian.40.t', '斐济独木战船'),
-    ('polynesian.8', 'polynesian.8.t', '家猪战争'),
-    ('prices.25', 'prices.25.t', '孟加拉染料作物种植园'),
-    ('privateers.1', 'privateers.1.t', '当地的商人请求援助'),
-    ('privateers.5', 'privateers.5.t', '私掠船船长成为了海盗'),
-    ('propagate_religion_events.9', 'propagate_religion_events.9.t', '穆斯林酋长'),
-    ('protestantism_events.12', 'protestantism_events.12.t', '宫廷里的天主教思想家'),
-    ('protestantism_events.13', 'protestantism_events.13.t', '的影响'),
-    ('protestantism_events.28', 'protestantism_events.28.t', '圣礼仪式'),
-    ('protestantism_events.31', 'protestantism_events.31.t', '敌对出版物的流通'),
-    ('protestantism_events.35', 'protestantism_events.35.t', '爱国而魅力非凡的传教士'),
-    ('protestantism_events.7', 'protestantism_events.7.t', '的「末日」'),
-    ('purple_phoenix.12', 'purple_phoenix.12.t', '宫廷派系影响统治者'),
-    ('purple_phoenix.14', 'purple_phoenix.14.t', '宫廷派系影响统治者'),
-    ('purple_phoenix.16', 'purple_phoenix.16.t', '宫廷派系影响统治者'),
-    ('3097', 'EVTNAME3097', '起义！'),
-    ('5026', 'EVTNAME5026', '瘟疫！'),
-    ('5045', 'EVTNAME5045', '政策失当'),
-    ('5053', 'EVTNAME5053', '商人团不满。'),
-    ('5063', 'EVTNAME5063', '贵族冲突'),
-    ('5077', 'EVTNAME5077', '政令不行'),
-    ('5091', 'EVTNAME5091', '支持流亡的异见者'),
-    ('5093', 'EVTNAME5093', '议会要求开出顾问'),
-    ('5095', 'EVTNAME5095', '急功近利的顾问'),
-    ('6422', 'EVTNAME6422', '劣质的制服'),
-    ('6424', 'EVTNAME6424', '冷漠的原住民'),
-    ('6425', 'EVTNAME6425', '食盐危机'),
-    ('6427', 'EVTNAME6427', '劣质铜矿'),
-    ('6429', 'EVTNAME6429', '劣质铁矿'),
-    ('6432', 'EVTNAME6432', '倾茶事件'),
-    ('6433', 'EVTNAME6433N', '风暴'),
-    ('6434', 'EVTNAME6434', '香料歉收'),
-    ('713', 'EVTNAME713', '不思进取'),
-    ('715', 'EVTNAME715', '使宫廷窘迫'),
-    ('726', 'EVTNAME726', '的声誉受损！'),
-    ('730', 'EVTNAME730', '无用的陆军科技研究'),
-    ('731', 'EVTNAME731', '海军研究的错误！'),
-    ('732', 'EVTNAME732', '新的贸易研究是异端行为'),
-    ('733', 'EVTNAME733', '有缺陷的工业研究'),
-    ('734', 'EVTNAME734', '应该建立一个稳定的政府'),
-    ('735', 'EVTNAME735', '懦夫的一代'),
-    ('738', 'EVTNAME738', '天真的贵族'),
-    ('740', 'EVTNAME740', '走私猖獗'),
-    ('806', 'EVTNAME806', '国家破坏政府稳定'),
-    ('836', 'EVTNAME836', '海军思潮的折磨'),
-    ('837', 'EVTNAME837', '海军军官退役'),
-    ('855', 'EVTNAME855', '士兵不学无术'),
-    ('858', 'EVTNAME858', '失败的外交！'),
-    ('859', 'EVTNAME859', '厌战的民众'),
-    ('877', 'EVTNAME877', '汗热病在传播'),
-    ('random_event.15', 'random_event.EVTNAME15', '滑膛枪还是弓箭？'),
-    ('random_event.23', 'random_event.EVTNAME23', '流感！'),
-    ('random_event.24', 'random_event.EVTNAME24', '流感蔓延'),
-    ('random_event.26', 'EVTNAME9478', '贬值的货币'),
-    ('random_event.27', 'random_event.27.t', '大火'),
-    ('random_event.3', 'random_event.EVTNAME3', '议会中的叛徒'),
-    ('757', 'EVTNAME757', ' 发生叛乱！'),
-    ('2011', 'EVTNAME2011', '改革宗派传播'),
-    ('6175', 'EVTNAME6175', '乌理玛表示担忧'),
-    ('6176', 'EVTNAME6176', '阿亚图拉表示担忧'),
-    ('republic_factions.15', 'republic_factions.15.t', '核心集团'),
-    ('republic_factions.16', 'republic_factions.16.t', '一次有益的交流'),
-    ('republic_factions.17', 'republic_factions.17.t', '血浓于水'),
-    ('republic_factions.21', 'republic_factions.21.t', '行会阻碍贸易'),
-    ('republic_factions.23', 'republic_factions.23.t', '贵族拒绝共和'),
-    ('republics.10', 'republics.10.t', '议会中的分歧'),
-    ('republics.11', 'republics.11.t', '影响政府的争端'),
-    ('republics.12', 'republics.12.t', '贸易战争'),
-    ('republics.13', 'republics.13.t', '典礼中断'),
-    ('republics.20', 'EVTNAME9556', '激烈的辩论'),
-    ('republics.22', 'EVTNAME9558', '意见冲突'),
-    ('republics.26', 'EVTNAME9562', '受影响的决议'),
-    ('republics.40', 'EVTNAME9576', '超支'),
-    ('republics.5', 'republics.5.t', '新钱币'),
-    ('republics.9', 'republics.9.t', '贵族密谋'),
-    ('revolutionary_republic_factions.1', 'revolutionary_republic_factions.1.t', '失牧之群'),
-    ('revolutionary_republic_factions.7', 'revolutionary_republic_factions.7.t', '缺少行政人员'),
-    ('revolutionary_republic_factions.8', 'revolutionary_republic_factions.8.t', '名将'),
-    ('revolutionary_republic_factions.9', 'revolutionary_republic_factions.9.t', '大屠杀'),
-    ('sailor_event.2', 'sailor_event.2.t', '海上苦旅'),
-    ('seven_cities_events.101', 'seven_cities_events.101.t', '要么啃皮革，要么死掉'),
-    ('seven_cities_events.102', 'seven_cities_events.102.t', '土著袭来之时'),
-    ('seven_cities_events.104', 'seven_cities_events.104.t', '神隐'),
-    ('seven_cities_events.307', 'seven_cities_events.307.t', '牙龈出血和牙齿脱落'),
-    ('seven_cities_events.309', 'seven_cities_events.309.t', '发生在的哗变！'),
-    ('seven_cities_events.407', 'seven_cities_events.407.t', '的钻石是假的'),
-    ('seven_cities_events.414', 'seven_cities_events.414.t', '一片死寂的湖'),
-    ('shinto_events.45', 'shinto_events.45.t', '基督徒群体遇袭'),
-    ('siberian_events.3', 'siberian_events.3.t', '渔猎人'),
-    ('sikhism_flavor.1', 'sikhism_flavor.1.t', '锡克信仰'),
-    ('sikhism_flavor.13', 'sikhism_flavor.13.t', '的上师'),
-    ('subject_interaction_events.17', 'subject_interaction_events.17.t', '战争从未改变'),
-    ('subject_interaction_events.20', 'subject_interaction_events.20.t', '挥霍无度的效忠派'),
-    ('subject_interaction_events.21', 'subject_interaction_events.21.t', '效忠派造成窘局'),
-    ('subject_interaction_events.23', 'subject_interaction_events.23.t', '效忠派引发叛乱'),
-    ('subject_interaction_events.35', 'subject_interaction_events.35.t', '不忠诚的属国'),
-    ('tyw_events.11', 'tyw_events.11.t', '胡格诺派信徒聚集在拉罗谢尔'),
-    ('tyw_events.19', 'tyw_events.19.t', '冬季围城'),
-    ('tyw_events.23', 'tyw_events.23.t', '同盟之敌'),
-    ('tyw_events.25', 'tyw_events.25.t', '信徒质疑我们的统治'),
-    ('tyw_events.40', 'tyw_events.40.t', '和平是上帝的旨意'),
-    ('tyw_events.5', 'tyw_events.5.t', '封锁'),
-    ('tengri_events.13', 'tengri_events.13.t', '宫廷骚乱'),
-    ('tengri_events.23', 'tengri_events.23.t', '的偶像破坏'),
-    ('tengri_events.3', 'tengri_events.3.t', '勇士失去他们的遗产'),
-    ('tengri_events.31', 'tengri_events.31.t', '的担忧'),
-    ('tengri_events.36', 'tengri_events.36.t', '颜面尽失'),
-    ('tengri_events.45', 'tengri_events.45.t', '宫廷生活'),
-    ('tengri_events.46', 'tengri_events.46.t', '婆罗门与萨满'),
-    ('tengri_events.5', 'tengri_events.5.t', '危机'),
-    ('tengri_events.54', 'tengri_events.54.t', '奢侈品限制法令？'),
-    ('tengri_events.62', 'tengri_events.62.t', '保护朝圣者'),
-    ('tengri_events.63', 'tengri_events.63.t', '和卓的威望'),
-    ('papacy_events.13', 'papacy_events.13.t', '装饰西斯廷礼拜堂'),
-    ('totemism_flavor.11', 'totemism_flavor.11.t', '传说终结之处'),
-    ('totemism_flavor.7', 'totemism_flavor.7.t', '失声'),
-    ('trade.1', 'trade.1.t', '尊重我们的旗帜'),
-    ('trade.11', 'trade.11.t', '商人流失'),
-    ('trade.2', 'trade.2.t', '是可忍孰不可忍'),
-    ('trade.4', 'trade.4.t', '贸易危机'),
-    ('trade.6', 'trade.6.t', '商船失事！'),
-    ('trade.8', 'trade.8.t', '倦怠的商人'),
-    ('trade_company_events.11', 'trade_company_events.EVTNAME11', '贸易公司遇到麻烦'),
-    ('trade_league.1', 'trade_league.1.t', '山丘之王'),
-    ('trade_league.12', 'trade_league.12.t', '拒绝票据！'),
-    ('trade_league.2', 'trade_league.2.t', '富人更富'),
-    ('trade_policy_events.11', 'trade_policy_events.11.t', '对需求的短缺'),
-    ('tribal_federation_events.1', 'tribal_federation_events.1.t', '的部族'),
-    ('tribal_federation_events.7', 'tribal_federation_events.7.t', '宗室'),
-    ('9202', 'EVTNAME9202', '软弱的。'),
-    ('9203', 'EVTNAME9203', '家是一个爱好和平的家族'),
-    ('9204', 'EVTNAME9204', '王朝失去了部落的尊敬'),
-    ('tributary_events.18', 'tributary_events.18.t', '朝贡船队受海盗困扰'),
-    ('tributary_events.26', 'tributary_events.26.t', '劫掠'),
-    ('tributary_events.9', 'tributary_events.9.t', '管理朝贡体系'),
-    ('usa_dlc.40', 'usa_dlc.EVTNAME40', '纽约大火'),
-    ('zoroastrian.1', 'zoroastrian.1.t', '桑占的帕西人避难所'),
-    ('center_of_revolution.13', 'center_of_revolution.13.t', '自由理想'),
-    ('center_of_revolution.2001', 'center_of_revolution.2001.name', '面粉战争'),
-    ('center_of_revolution.3', 'center_of_revolution.3.name', '殖民地局势动荡'),
-    ('center_of_revolution.8', 'center_of_revolution.8.name', '的反革命分子'),
-    ('french_wars_of_religion.13', 'flavor_fra.EVTNAME3196', '王都陷落！'),
-    ('french_wars_of_religion.6', 'flavor_fra.EVTNAME3200', '宗教狂热'),
-    ('french_wars_of_religion.8', 'flavor_fra.EVTNAME3202', '狂热异端分子'),
-    ('dai_disaster.3', 'dai_disaster.3.t', '在的王朝紧张局势'),
-    ('plot_of_the_harem_events.6', 'plot_of_the_harem_events.6.t', '试探皇权的极限'),
-    ('brahmins_estate_events.2', 'brahmins_estate_events.2.t', '婆罗门要求朝廷职位正当化'),
-    ('burghers_estate_events.14', 'burghers_estate_events.14.t', '经济政策'),
-    ('church_estate_events.6', 'church_estate_events.6.t', '的崛起？'),
-    ('cossack_estate_events.14', 'cossack_estate_events.14.t', '索要拓宽特权'),
-    ('janissaries_estate_events.4', 'janissaries_estate_events.4.t', '耶尼切里领地所有权'),
-    ('janissaries_estate_events.9', 'janissaries_estate_events.9.t', '耶尼切里提出要求'),
-    ('estate_regency_events.6', 'estate_regency_events.6.t', '宗教偏狭加深'),
-    ('estate_regency_events.8', 'estate_regency_events.8.t', '鬼影幢幢'),
-    ('nobles_estate_events.3', 'nobles_estate_events.3.t', '侵占的土地'),
-    ('nobles_estate_events.6', 'nobles_estate_events.6.t', '要求颁布更严格的奢侈品禁令'),
-    ('nobles_estate_events.9', 'nobles_estate_events.9.t', '的违抗'),
-    ('tribal_estate_events.11', 'tribal_estate_events.11.t', '大位的继承'),
-    ('tribal_estate_events.12', 'tribal_estate_events.12.t', '部落要求更多的人力'),
-    ('tribal_estate_events.14', 'tribal_estate_events.14.t', '的要求'),
-    ('flavor_ayu.4', 'flavor_ayu.EVTNAME4', '无能的·'),
-    ('flavor_azt.14', 'flavor_azt.14.t', '大瘟疫'),
-    ('flavor_azt.5', 'flavor_azt.5.t', '兔一年的饥荒'),
-    ('flavor_bah.5', 'flavor_bah.5.t', '德干派和西方派'),
-    ('new_flavour_bav.25', 'new_flavour_bav.25.name', '我们的债务被豁免了'),
-    ('new_flavour_bav.27', 'new_flavour_bav.27.name', '丹麦统治下的暗流'),
-    ('flavor_bng.7', 'flavor_bng.7.t', '布尔修特罗阇'),
-    ('flavor_brapru.30', 'flavor_brapru.30.t', '柯尼斯堡的市民'),
-    ('MEE_Byzantine_Events.47', 'MEE_Byzantine_Events.47.t', '反教会归一分子叛乱'),
-    ('flavor_che.2', 'flavor_che.2.t', '复仇'),
-    ('flavor_che.3', 'flavor_che.3.t', '与欧洲人的接触'),
-    ('flavor_dai.2', 'flavor_dai.EVTNAME2', '南北朝'),
-    ('flavor_dan.9', 'flavor_dan.9.t', '鲱鱼逐渐消失'),
-    ('kalmar_union_events.10', 'kalmar_union_events.10.t', '卡尔马联盟的陨落'),
-    ('kalmar_union_events.7', 'kalmar_union_events.7.t', '篡位者发动叛乱'),
-    ('flavor_dlh.3', 'flavor_dlh.EVTNAME3', '洛迪王朝'),
-    ('flavor_daimyo.15', 'flavor_daimyo.15.t', '岛原之乱'),
-    ('flavor_daimyo.23', 'flavor_daimyo.23.t', '信长的野望'),
-    ('flavor_daimyo.5', 'flavor_daimyo.5.t', '合理的继承'),
-    ('flavor_daimyo.6', 'flavor_daimyo.6.t', '的继承权'),
-    ('flavor_daimyo.8', 'flavor_daimyo.8.t', '扇谷家'),
-    ('flavor_eth.23', 'flavor_eth.23.t', '奥罗莫定居者'),
-    ('flavor_eth.28', 'flavor_eth.28.t', '王山的灾难'),
-    ('flavor_eth.52', 'flavor_eth.52.t', '的耶稣会活动'),
-    ('flavor_ful.1', 'flavor_ful.1.t', '隐士在发动叛乱'),
-    ('flavor_gen.8', 'flavor_gen.8.t', '圣乔治银行破产'),
-    ('flavor_guj.4', 'flavor_guj.4.t', '尚庞沦陷'),
-    ('flavor_hol.10', 'flavor_hol.10.t', '联合东印度公司的困境'),
-    ('flavor_hol.11', 'flavor_hol.11.t', '经济危机中的联合东印度公司'),
-    ('flavor_hol.12', 'flavor_hol.12.t', '联合东印度公司国有化？'),
-    ('flavor_hol.13', 'flavor_hol.13.t', '阿姆斯特丹银行与国际资本市场'),
-    ('flavor_hol.211', 'flavor_hol.211.t', '分食'),
-    ('flavor_hol.22', 'flavor_hol.22.t', '阿鲁姆黑军起义'),
-    ('flavor_hol.23', 'flavor_hol.23.t', '假发时期'),
-    ('flavor_hol.3508', 'flavor_hol.EVTNAME3508', '尼德兰的加尔文宗'),
-    ('flavor_hol.3515', 'flavor_hol.EVTNAME3515', '荷兰革命'),
-    ('flavor_hol.6', 'flavor_hol.6.t', '郁金香狂热'),
-    ('flavor_hun.19', 'flavor_hun.19.t', '雇佣兵哗变'),
-    ('flavor_hun.49', 'flavor_hun.49.t', '尤拉伊·亚诺希克'),
-    ('flavor_hun.50', 'flavor_hun.50.t', '亚诺希克再次来袭'),
-    ('flavor_hun.8', 'flavor_hun.8.t', '匈牙利吸血鬼'),
-    ('flavor_iro.1', 'flavor_iro.1.t', '不可饶恕的公然冒犯'),
-    ('flavor_jap.32', 'flavor_jap.EVTNAME32', '刀狩－糟糕的执行者'),
-    ('flavor_jap.42', 'flavor_jap.EVTNAME42', '颜面大失'),
-    ('flavor_jap.45', 'flavor_jap.EVTNAME45', '献给天皇的漆器'),
-    ('flavor_jap.7', 'flavor_jap.EVTNAME7', '南蛮贸易'),
-    ('flavor_jap.71', 'flavor_jap.71.t', '明历大火'),
-    ('flavor_kon.10', 'flavor_kon.10.t', '皈依天主教！'),
-    ('flavor_kor.10', 'flavor_kor.10.t', '士林派的崛起'),
-    ('flavor_kor.3', 'flavor_kor.EVTNAME3', '第二次士祸'),
-    ('flavor_kor.8', 'flavor_kor.8.t', '朝鲜农民暴动'),
-    ('flavor_kor.9', 'flavor_kor.9.t', '林巨正起事'),
-    ('flavor_lit.12', 'flavor_lit.EVTNAME12', '可怕的瘟疫流行于立陶宛'),
-    ('flavor_lit.19', 'flavor_lit.19.t', '赫梅利尼茨基起义'),
-    ('flavor_mam.13', 'flavor_mam.13.t', '开罗瘟疫'),
-    ('flavor_mam.9', 'flavor_mam.9.t', '马穆鲁克贵族'),
-    ('flavor_mng.11', 'flavor_mng.EVTNAME11', '财政危机'),
-    ('flavor_mng.13', 'flavor_mng.EVTNAME13', '驱逐耶稣会士'),
-    ('flavor_mng.54', 'flavor_mng.54.t', '年地震'),
-    ('flavor_mng.8', 'flavor_mng.EVTNAME8', '饥荒！'),
-    ('flavor_mor.5', 'flavor_mor.5.t', '阿布·扎卡里耶·叶海亚·瓦塔斯'),
-    ('flavor_mos.7', 'flavor_mos.7.t', '莫斯科内战第三阶段'),
-    ('flavor_mug.3', 'flavor_mug.EVTNAME3', '锡克教徒骚乱'),
-    ('flavor_mug.4', 'flavor_mug.EVTNAME4', '阿富汗叛乱'),
-    ('flavor_nap.5', 'flavor_nap.5.t', '马萨涅洛起义'),
-    ('flavor_nap.6', 'flavor_nap.6.t', '那不勒斯的瘟疫'),
-    ('flavor_pol.3467', 'flavor_pol.EVTNAME3467', '涅沙瓦特权——特别协议'),
-    ('flavor_pol.3493', 'flavor_pol.EVTNAME3493', '可怕的瘟疫流行于立陶宛'),
-    ('flavor_pol.3738', 'flavor_pol.EVTNAME3738', '瑟姆议会拒绝动员更多的军队'),
-    ('flavor_pol.3744', 'flavor_pol.EVTNAME3744', '瑟姆议会否决所有政策'),
-    ('flavor_sax.6', 'flavor_sax.6.name', '萨克森王子被劫为人质'),
-    ('flavor_sax.7', 'flavor_sax.7.name', '萨克森王子被劫为人质'),
-    ('flavor_sco.4', 'flavor_sco.EVTNAME4', '约翰·诺克斯与宗教冲突'),
-    ('flavor_sio.2', 'flavor_sio.2.t', '往生极乐猎场'),
-    ('flavor_sio.4', 'flavor_sio.4.t', '不速之客'),
-    ('flavor_son.4', 'flavor_son.4.t', '穆罕默德的崛起'),
-    ('flavor_teu.22', 'flavor_teu.22.t', '德意志农民战争'),
-    ('flavor_tim.21', 'flavor_tim.21.t', '伊斯法罕的行动'),
-    ('flavor_tus.20', 'flavor_tus.20.t', '帕齐阴谋'),
-    ('flavor_tupi.16', 'flavor_tupi.16.t', '卡拉穆鲁的欧洲之旅'),
-    ('flavor_vie.1', 'flavor_vie.EVTNAME1', '继承危机'),
-    ('flavor_vij.11', 'flavor_vij.11.t', '泰米尔贸易工会'),
-    ('flavor_zan.4', 'flavor_zan.4.t', '食人族！'),
-    ('flavor_zan.7', 'flavor_zan.7.t', '炮制阴谋的维齐尔'),
-    ('flavor_zim.9', 'flavor_zim.9.t', '沦陷！'),
-    ('ideagroups.100', 'EVTNAME803', '损失稳定'),
-    ('ideagroups.1001', 'EVTNAME6101', '人民对海军事业的热情削减'),
-    ('ideagroups.1005', 'EVTNAME6105', '傲慢的海军'),
-    ('ideagroups.1007', 'EVTNAME6107', '海军纪律废弛'),
-    ('ideagroups.1009', 'EVTNAME6109', '关心造船工人'),
-    ('ideagroups.101', 'EVTNAME804', '市民造反！'),
-    ('ideagroups.1011', 'EVTNAME6111', '海军素质下降'),
-    ('ideagroups.1012', 'EVTNAME839', '军械库荒废'),
-    ('ideagroups.1013', 'EVTNAME840', '将军退休'),
-    ('ideagroups.103', 'EVTNAME812', '农民起义'),
-    ('ideagroups.105', 'EVTNAME814', '严重叛乱'),
-    ('ideagroups.1101', 'EVTNAME6145', '产量滞涩'),
-    ('ideagroups.1103', 'EVTNAME6147', '腐败的官僚机构'),
-    ('ideagroups.1107', 'EVTNAME6149', '国家银行的问题'),
-    ('ideagroups.1204', 'EVTNAME6143', '腐败的总督'),
-    ('ideagroups.1205', 'ideagroups.1205.t', '与土著的友谊'),
-    ('ideagroups.1209', 'ideagroups.1209.t', '殖民地困境！'),
-    ('ideagroups.1210', 'ideagroups.1210.t', '歉收'),
-    ('ideagroups.1300', 'EVTNAME842', '不合格的新兵'),
-    ('ideagroups.1301', 'EVTNAME843', '贵族的担忧'),
-    ('ideagroups.1305', 'EVTNAME6307', '兵员危机'),
-    ('ideagroups.1400', 'EVTNAME845', '人们嘲笑军队'),
-    ('ideagroups.1401', 'EVTNAME846', '将领难寻'),
-    ('ideagroups.1409', 'ideagroups.1409.t', '木材短缺'),
-    ('ideagroups.1410', 'ideagroups.1410.t', '管理问题'),
-    ('ideagroups.1507', 'ideagroups.1507.t', '殖民地灾害'),
-    ('ideagroups.1509', 'ideagroups.1509.t', '造船问题'),
-    ('ideagroups.1510', 'ideagroups.1510.t', '外交失言'),
-    ('ideagroups.1601', 'EVTNAME6335', '省份因缺乏自主权而沮丧'),
-    ('ideagroups.1602', 'EVTNAME6337', '省份要求更多自主权'),
-    ('ideagroups.1609', 'ideagroups.1609.t', '失败的管理'),
-    ('ideagroups.1610', 'ideagroups.1610.t', '付款要求'),
-    ('ideagroups.1707', 'ideagroups.1707.t', '海上灾难'),
-    ('ideagroups.1708', 'ideagroups.1708.t', '兵源流失'),
-    ('ideagroups.1709', 'ideagroups.1709.t', '木材腐烂'),
-    ('ideagroups.1806', 'ideagroups.1806.t', '真理在大炮射程之内'),
-    ('ideagroups.1809', 'ideagroups.1809.t', '粗鲁的要求'),
-    ('ideagroups.1810', 'ideagroups.1810.t', '敌意言论'),
-    ('ideagroups.1907', 'ideagroups.1907.t', '缰绳过松'),
-    ('ideagroups.1909', 'ideagroups.1909.t', '传教工作徒劳无功'),
-    ('ideagroups.1910', 'ideagroups.1910.t', '守旧势力反击'),
-    ('ideagroups.1915', 'ideagroups.1915.t', '光芒的消逝'),
-    ('ideagroups.1916', 'ideagroups.1916.t', '尊贵之人亦当怀疑'),
-    ('ideagroups.1926', 'ideagroups.1926.t', '沉默的羔羊'),
-    ('ideagroups.1927', 'ideagroups.1927.t', '精神错乱'),
-    ('ideagroups.1935', 'ideagroups.1935.t', '不敬先祖'),
-    ('ideagroups.1938', 'ideagroups.1938.t', '失控的大火'),
-    ('ideagroups.1941', 'ideagroups.1941.t', '新观念并不适合所有人'),
-    ('ideagroups.200', 'EVTNAME800', '贵族起义'),
-    ('ideagroups.2000', 'ideagroups.2000.t', '乡村道路年久失修'),
-    ('ideagroups.2003', 'ideagroups.2011.t', '建筑物资不足'),
-    ('ideagroups.2004', 'ideagroups.2020.t', '的发展放慢了'),
-    ('ideagroups.201', 'EVTNAME801', '损失威望'),
-    ('ideagroups.2013', 'ideagroups.2013.t', '宫廷混乱'),
-    ('ideagroups.2015', 'ideagroups.2015.t', '腐化的明证'),
-    ('ideagroups.2017', 'ideagroups.2017.t', '宫廷需要翻新'),
-    ('ideagroups.2021', 'ideagroups.2005.t', '将军们的抱怨'),
-    ('ideagroups.2028', 'ideagroups.2028.t', '雇佣兵的声誉'),
-    ('ideagroups.204', 'EVTNAME6157', '强烈反对'),
-    ('ideagroups.205', 'EVTNAME815', '人们不见了'),
-    ('ideagroups.206', 'EVTNAME816', '失控'),
-    ('ideagroups.211', 'EVTNAME6341', '贵族表示担忧'),
-    ('ideagroups.300', 'EVTNAME818', '危险的思想正在蔓延！'),
-    ('ideagroups.301', 'EVTNAME819', '孤芳自赏'),
-    ('ideagroups.304', 'EVTNAME6194', '缺乏值得赞助的艺术杰作'),
-    ('ideagroups.306', 'EVTNAME6192', '科学革命中断'),
-    ('ideagroups.401', 'EVTNAME822', '骚乱'),
-    ('ideagroups.404', 'EVTNAME6196', '被打破的承诺'),
-    ('ideagroups.410', 'EVTNAME6333', '自由主义者的愤怒'),
-    ('ideagroups.501', 'EVTNAME6153', '间谍的背叛'),
-    ('ideagroups.503', 'ideagroups.503.t', '我们的活动是隐蔽的……'),
-    ('ideagroups.504', 'ideagroups.504.t', '更加高效地支持叛军'),
-    ('ideagroups.507', 'ideagroups.507.t', '谍报行动耗费精力过多！'),
-    ('ideagroups.601', 'EVTNAME6155', '腐败的政府'),
-    ('ideagroups.603', 'ideagroups.603.t', '不称职的外交官'),
-    ('ideagroups.607', 'ideagroups.607.t', '喋喋不休的小丑'),
-    ('ideagroups.700', 'EVTNAME830', '贵族的担忧'),
-    ('ideagroups.701', 'EVTNAME831', '太多胆小鬼'),
-    ('ideagroups.704', 'EVTNAME6113', '国民不想被强征入伍'),
-    ('ideagroups.706', 'EVTNAME6115', '我们的军队不再强大'),
-    ('ideagroups.708', 'EVTNAME6313', '要塞防御被忽视'),
-    ('ideagroups.800', 'EVTNAME833', '贵族不愿服役'),
-    ('ideagroups.801', 'EVTNAME834', '农夫的烦恼'),
-    ('ideagroups.806', 'EVTNAME6117', '军事上的安于现状'),
-    ('ideagroups.808', 'EVTNAME6133', '军队今不如昔'),
-    ('ideagroups.810', 'EVTNAME6325', '将军们担心我们的懦弱战术'),
-    ('ideagroups.901', 'EVTNAME6141', '自鸣得意的商人'),
-    ('ideagroups.903', 'EVTNAME6135', '我国商人表现不佳'),
-    ('ideagroups.905', 'EVTNAME6151', '贸易政策失败'),
-    ('ideagroups.910', 'ideagroups.910.t', '贸易崩溃'),
-    ('institution_events.10', 'institution_events.10.t', '缺乏官僚体系'),
-    ('institution_events.26', 'institution_events.26.t', '威信快速丧失'),
-    ('randomeventsstapehordes.1', 'randomeventsstapehordes.1.EVTNAME', '生于马背'),
-    ('randomeventsstapehordes.14', 'randomeventsstapehordes.14.EVTNAME', '焦躁不安的游牧民'),
-    ('randomeventsstapehordes.17', 'randomeventsstapehordes.17.EVTNAME', '部落冲突'),
-    ('randomeventsstapehordes.19', 'randomeventsstapehordes.19.EVTNAME', '打猎事故'),
-    ('randomeventsstapehordes.20', 'randomeventsstapehordes.20.EVTNAME', '我们看起来虚弱不堪'),
-    ('randomeventsstapehordes.21', 'randomeventsstapehordes.21.EVTNAME', '权威削弱'),
-    ('randomeventsstapehordes.22', 'randomeventsstapehordes.22.EVTNAME', '军事传统遭到嘲弄'),
-    ('randomeventsstapehordes.23', 'randomeventsstapehordes.23.EVTNAME', '军事传统遭到嘲弄'),
-    ('randomeventsstapehordes.5', 'randomeventsstapehordes.5.EVTNAME', '敌对部落劫掠'),
-)
-
-
 def fnv1a64(s):
     h = 0xCBF29CE484222325
     for c in s.encode("utf-8"):
@@ -1079,12 +498,288 @@ def fnv1a64(s):
     return h
 
 
-def blob_badev():
-    hs = sorted({fnv1a64(t) for _, t, _ in BAD_EVENTS})
-    return struct.pack("<Q", len(hs)) + b"".join(struct.pack("<Q", h) for h in hs)
+# ---------------------------------------------------------------------------
+# 恶性随机事件分析(安装时现算，不写死清单)
+# ---------------------------------------------------------------------------
+# 读游戏目录 + dlc_load.json 里启用的 mod 的脚本(后加载的同名文件覆盖前面的)，找出随机触发的事件
+# (on_actions 的 random_events、各 pulse 的 events、平均触发时间)，对每个选项判断是否“只有坏处”。
+# 结果按事件标题键做成表：每个事件一项 {标题键哈希, 有好处的选项位图, 要在运行时检查可用性的选项位图}；
+# 运行时只看玩家当下能选的选项：能选的全是“只有坏处”的，这个事件就不进玩家的随机池。
+
+_PDX_TOK = re.compile(r'\s+|#[^\n]*|"(?:[^"\\]|\\.)*"|[{}]|[<>!]?=|[<>]|[^\s{}=<>#"]+', re.S)
+_PDX_OPS = ('=', '<', '>', '<=', '>=', '!=', '==')
 
 
-BLOBS = {"@badev": blob_badev}
+def pdx_parse(s):
+    toks = [t for t in (m.group() for m in _PDX_TOK.finditer(s)) if not (t[0].isspace() or t[0] == '#')]
+    i = 0
+
+    def block():
+        nonlocal i
+        out = []
+        while i < len(toks):
+            t = toks[i]
+            if t == '}':
+                i += 1
+                return out
+            if i + 1 < len(toks) and toks[i + 1] in _PDX_OPS:
+                op = toks[i + 1]
+                i += 2
+                if i < len(toks) and toks[i] == '{':
+                    i += 1
+                    v = block()
+                else:
+                    v = toks[i].strip('"') if i < len(toks) else ''
+                    i += 1
+                out.append((t.strip('"'), op, v))
+            elif t == '{':
+                i += 1
+                out.append(('', None, block()))
+            else:
+                out.append((t.strip('"'), None, None))
+                i += 1
+        return out
+    return block()
+
+
+def pdx_read(path):
+    b = Path(path).read_bytes()
+    for enc in ('utf-8-sig', 'cp1252'):
+        try:
+            return b.decode(enc)
+        except UnicodeDecodeError:
+            pass
+    return b.decode('latin-1')
+
+
+def documents_dir():
+    """“我的文档”(可能被重定向)下的 EU4 目录。"""
+    try:
+        buf = ctypes.create_unicode_buffer(260)
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf) == 0:
+            return Path(buf.value) / "Paradox Interactive" / "Europa Universalis IV"
+    except OSError:
+        pass
+    return Path.home() / "Documents" / "Paradox Interactive" / "Europa Universalis IV"
+
+
+def content_roots(game_dir):
+    """按加载顺序返回内容目录：游戏目录，然后 dlc_load.json 里启用的 mod。"""
+    roots = [Path(game_dir)]
+    doc = documents_dir()
+    try:
+        mods = json.loads((doc / "dlc_load.json").read_text(encoding="utf-8")).get("enabled_mods", [])
+    except (OSError, ValueError):
+        mods = []
+    for m in mods:
+        try:
+            desc = pdx_parse(pdx_read(doc / m))
+        except OSError:
+            continue
+        for k, _, v in desc:
+            if k == "path" and isinstance(v, str):
+                p = Path(v)
+                roots.append(p if p.is_absolute() else doc / p)
+    return roots
+
+
+def merged_files(roots, sub):
+    m = {}
+    for r in roots:
+        d = r / sub
+        if d.is_dir():
+            for f in d.iterdir():
+                if f.suffix.lower() == ".txt":
+                    m[f.name] = f
+    return [m[k] for k in sorted(m)]
+
+
+# 修正：值越大越坏的(其余默认越大越好)
+_MOD_BAD_UP = {
+    'global_unrest', 'local_unrest', 'war_exhaustion', 'global_autonomy', 'local_autonomy', 'min_autonomy',
+    'min_local_autonomy', 'interest', 'liberty_desire', 'ae_impact', 'aggressive_expansion_impact', 'land_attrition',
+    'naval_attrition', 'inflation', 'stability_cost_modifier', 'overextension_impact_modifier', 'unjustified_demands',
+    'monthly_war_exhaustion', 'yearly_corruption', 'yearly_absolutism_decrease', 'devastation', 'local_devastation',
+    'prestige_decay', 'harsh_treatment_cost', 'years_of_nationalism', 'local_years_of_nationalism',
+    'rebel_support_efficiency', 'local_rebel_support_efficiency', 'fire_damage_received', 'shock_damage_received',
+    'global_monthly_devastation', 'local_monthly_devastation', 'yearly_karma_decay', 'enemy_core_creation',
+}
+# 效果：值为正时是坏处的
+_EFF_POS_BAD = ('corruption', 'war_exhaustion', 'inflation', 'autonomy', 'devastation', 'nationalism', 'unrest',
+                'doom', 'liberty_desire', 'aggressive_expansion', 'overextension', 'heretic', 'rebel', 'karma')
+_EFF_ALWAYS_BAD = {'kill_heir', 'kill_advisor', 'remove_advisor', 'kill_consort', 'kill_units', 'remove_core',
+                   'remove_claim', 'cede_province', 'add_loan', 'remove_estate_privilege', 'kill_leader', 'remove_heir',
+                   'spawn_rebels'}
+_EFF_ALWAYS_GOOD = {'add_core', 'add_claim', 'add_permanent_claim', 'add_territorial_core', 'create_general',
+                    'create_admiral', 'create_explorer', 'create_conquistador', 'define_advisor', 'add_building',
+                    'add_great_project_tier', 'hire_advisor', 'add_cb', 'add_casus_belli', 'add_idea', 'add_heir',
+                    'define_heir', 'define_ruler', 'add_estate_privilege', 'set_estate_privilege', 'add_institution',
+                    'country_event', 'province_event'}  # 接着触发别的事件：后续可能有好处
+_EFF_MODIFIER = {'add_country_modifier', 'add_province_modifier', 'add_permanent_province_modifier',
+                 'add_ruler_modifier', 'add_trade_modifier'}
+_EFF_SKIP = {'limit', 'trigger', 'ai_chance', 'name', 'tooltip', 'custom_tooltip', 'highlight', 'goto', 'modifier',
+             'factor', 'chance', 'duration', 'who', 'type', 'desc', 'text', 'title', 'picture', 'id', 'days',
+             'months', 'years', 'key', 'hidden'}
+_STATE = re.compile(r'^(clr_\w*flag|end_incident|end_disaster|set_variable|change_variable|subtract_variable|'
+                    r'start_incident|start_disaster)$')
+
+
+def _num(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _mod_sign(name):
+    n = name.lower()
+    if n in _MOD_BAD_UP or n.endswith('_cost') or 'cost' in n.split('_') or n.endswith('_decay') \
+            or 'unrest' in n or 'rebel' in n or ('attrition' in n and 'hostile' not in n):
+        return -1
+    return 1
+
+
+class EventAnalyzer:
+    def __init__(self, roots):
+        self.roots = roots
+        self.modifiers, self.scripted = {}, {}
+        for sub, dst in (('common/event_modifiers', self.modifiers), ('common/static_modifiers', self.modifiers),
+                         ('common/scripted_effects', self.scripted)):
+            for f in merged_files(roots, sub):
+                for k, _, v in pdx_parse(pdx_read(f)):
+                    if isinstance(v, list):
+                        dst[k] = v
+
+    def modifier_score(self, name):
+        s = 0
+        for k, _, v in self.modifiers.get(name, []):
+            x = _num(v)
+            if x:
+                s += _mod_sign(k) * (1 if x > 0 else -1)
+        return (s > 0) - (s < 0)
+
+    def score(self, block, depth=0):
+        """(好处项数, 坏处项数)。封装的脚本效果展开后再算。"""
+        g = b = 0
+        if depth > 12:
+            return 0, 0
+        for k, _, v in block:
+            if not k or k in _EFF_SKIP:
+                continue
+            if k in self.scripted:
+                x, y = self.score(self.scripted[k], depth + 1)
+                g, b = g + x, b + y
+            elif k in _EFF_ALWAYS_BAD or k.endswith('_rebels'):
+                b += 1
+            elif k in _EFF_ALWAYS_GOOD:
+                g += 1
+            elif k in _EFF_MODIFIER and isinstance(v, list):
+                d = {kk: vv for kk, _, vv in v}
+                s = self.modifier_score(d.get('name')) if d.get('name') else 0
+                if not s and _num(d.get('power')):  # add_trade_modifier { power = -10 }
+                    s = 1 if _num(d.get('power')) > 0 else -1
+                g, b = g + (s > 0), b + (s < 0)
+            elif (k.startswith('add_') or k.startswith('change_')) and (
+                    _num(v) or (isinstance(v, list) and any(_num(vv) for kk, _, vv in v
+                                                            if kk in ('value', 'amount', 'loyalty', 'influence')))):
+                x = _num(v) if _num(v) else next(_num(vv) for kk, _, vv in v
+                                                  if kk in ('value', 'amount', 'loyalty', 'influence') and _num(vv))
+                if (x > 0) != any(w in k for w in _EFF_POS_BAD):
+                    g += 1
+                else:
+                    b += 1
+            elif isinstance(v, list):
+                x, y = self.score(v, depth + 1)
+                g, b = g + x, b + y
+        return g, b
+
+    @staticmethod
+    def _touches_state(block):
+        for k, _, v in block:
+            if _STATE.match(k or '') or (isinstance(v, list) and EventAnalyzer._touches_state(v)):
+                return True
+        return False
+
+    @staticmethod
+    def _mentions(block, word):
+        for k, _, v in block:
+            if word in (k or '') or (isinstance(v, str) and word in v) or \
+                    (isinstance(v, list) and EventAnalyzer._mentions(v, word)):
+                return True
+        return False
+
+    def analyze(self):
+        """返回 {标题键: (有好处的选项位图, 运行时检查可用性的选项位图)}，只含可能被拦的事件。"""
+        events = {}
+        for f in merged_files(self.roots, 'events'):
+            for k, _, v in pdx_parse(pdx_read(f)):
+                if k in ('country_event', 'province_event') and isinstance(v, list):
+                    d = {}
+                    for kk, _, vv in v:
+                        d.setdefault(kk, []).append(vv)
+                    if d.get('id'):
+                        events[d['id'][0]] = d
+        rnd = set()
+        for f in merged_files(self.roots, 'common/on_actions'):
+            for k, _, v in pdx_parse(pdx_read(f)):
+                if not isinstance(v, list):
+                    continue
+                for kk, _, vv in v:
+                    if kk == 'random_events' and isinstance(vv, list):
+                        rnd |= {e for _, _, e in vv if isinstance(e, str) and e != '0'}
+                    elif kk == 'events' and 'pulse' in k and isinstance(vv, list):
+                        rnd |= {e for e, _, _ in vv if e}
+        for i, d in events.items():
+            if 'mean_time_to_happen' in d and d.get('is_triggered_only', ['no'])[0] != 'yes':
+                rnd.add(i)
+        by_title, out = {}, {}
+        for i, d in events.items():
+            t = d.get('title', [None])[0]
+            if isinstance(t, str):
+                by_title.setdefault(t, []).append(i)
+        for i in rnd:
+            d = events.get(i)
+            if not d or d.get('hidden', ['no'])[0] == 'yes':
+                continue
+            t = d.get('title', [None])[0]
+            opts = [o for o in d.get('option', []) if isinstance(o, list)]
+            if not isinstance(t, str) or not opts or len(opts) > 64:
+                continue
+            if any(isinstance(v, list) and self._touches_state(v)
+                   for key in ('option', 'immediate', 'after') for v in d.get(key, [])):
+                continue
+            if any(isinstance(v, list) and self.score(v)[0] for v in d.get('immediate', [])):
+                continue
+            good = check = 0
+            for n, o in enumerate(opts):
+                g, b = self.score(o)
+                if g or not b:
+                    good |= 1 << n  # 有好处或没有坏处
+                trig = [v for k, _, v in o if k == 'trigger' and isinstance(v, list)]
+                if trig and not any(self._mentions(tb, 'event_target') for tb in trig):
+                    check |= 1 << n  # 有选项条件：运行时问引擎能不能选(用到事件目标的当作能选)
+            if good == (1 << len(opts)) - 1:
+                continue  # 每个选项都有好处，不可能被拦
+            prev = out.get(t)
+            if prev is not None and prev != (good, check):
+                out[t] = None  # 同标题的事件选项不同，没法按标题区分
+            else:
+                out[t] = (good, check)
+            if any(j not in rnd for j in by_title[t] if j != i):
+                out[t] = None  # 标题和非随机事件共用
+        return {t: v for t, v in out.items() if v}
+
+
+def blob_badev(game_dir):
+    """恶性事件表：数量 + 按哈希升序的 {标题键哈希, 有好处的选项位图, 检查可用性的选项位图}。"""
+    res = EventAnalyzer(content_roots(game_dir)).analyze()
+    ent = sorted((fnv1a64(t), g, c) for t, (g, c) in res.items())
+    log(f"恶性事件分析：{len(ent)} 个随机事件可能被拦(运行时看玩家能选的选项)")
+    return struct.pack("<Q", len(ent)) + b"".join(struct.pack("<QQQ", *e) for e in ent)
+
+
+# 补丁内存里的数据块：键 -> 函数(img)，安装时生成
+BLOBS = {"@badev": lambda img: blob_badev(img.path.parent)}
 
 def rel_target(img, insn_rva, disp_off, insn_len):
     return insn_rva + insn_len + struct.unpack("<i", img.bytes_at(insn_rva + disp_off, 4))[0]
@@ -1164,13 +859,13 @@ def install_all(h, base, img):
         todo.append((name, entry, pro, cave, keys))
     if not todo:
         return out
-    arena = P.alloc_near(h, base + img.text_rva + len(img.text) // 2, 0x4000)
+    arena = P.alloc_near(h, base + img.text_rva + len(img.text) // 2, 0x20000)
     if not arena:
         return out + [("补丁", "分配内存失败")]
     cur_off = 0
     blob_at = {}
     for k in {k for *_, keys in todo for k in keys if k.startswith("@")}:
-        data = BLOBS[k]()
+        data = BLOBS[k](img)
         if not P.write_mem(h, arena + cur_off, data):
             return out + [("补丁", f"写入数据 {k} 失败")]
         blob_at[k] = arena + cur_off
