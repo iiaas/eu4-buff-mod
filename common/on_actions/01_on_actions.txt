@@ -1,0 +1,134 @@
+on_startup = {
+	if = {
+		limit = { ai = no }
+		add_mercantilism = 100
+		add_country_modifier = { name = luck duration = -1 hidden = yes }
+
+		set_estate_privilege = estate_church_land_rights
+		set_estate_privilege = estate_church_religious_state
+		set_estate_privilege = estate_church_religious_diplomats
+		set_estate_privilege = estate_church_development_of_temples
+
+		set_estate_privilege = estate_nobles_nobility_primacy
+		set_estate_privilege = estate_nobles_supremacy_over_crown
+		set_estate_privilege = estate_nobles_development_of_castles
+		set_estate_privilege = estate_nobles_officer_corp
+
+		set_estate_privilege = estate_burghers_land_of_commerce
+		set_estate_privilege = estate_burghers_financial_demand
+		set_estate_privilege = estate_burghers_development_of_cities
+		set_estate_privilege = estate_burghers_admirals
+		
+		change_estate_land_share = { estate = all share = -100 }
+		save_global_event_target_as = player
+	}
+}
+
+on_war_won = {
+	if = {
+		limit = { ai = no }
+		every_owned_province = {
+			if = {
+				limit = { NOT = { is_core = ROOT } }
+				add_territorial_core = ROOT
+			}
+			change_religion = ROOT
+			set_local_autonomy = 0
+			add_nationalism = -30
+			add_devastation = -100
+			clear_rebels = yes
+		}
+	}
+}
+
+on_monthly_pulse = {
+	if = { 
+		limit = { ai = no }
+		every_ally = {
+			add_favors = { who = ROOT amount = -10 }
+			add_opinion = { who = ROOT modifier = opinion_improved_relations multiplier = 10 }
+		}
+		every_subject_country = {
+			add_opinion = { who = ROOT modifier = opinion_improved_relations multiplier = 10 }
+		}
+		every_war_enemy_country = {
+			add_spy_network_from = { who = ROOT value = 100 }
+		}
+		if = {
+			limit = { NOT = { employed_advisor = { category = ADM } } }
+			hire_advisor = { skill = 5 cost_multiplier = 0 type = natural_scientist }
+			create_general = { tradition = 100 }
+		}
+		if = {
+			limit = { NOT = { employed_advisor = { category = DIP } } }
+			hire_advisor = { skill = 5 cost_multiplier = 0 type = trader }
+			create_admiral = { tradition = 100 }
+		}
+		if = {
+			limit = { NOT = { employed_advisor = { category = MIL } } }
+			hire_advisor = { skill = 5 cost_multiplier = 0 type = army_reformer }
+			create_general = { tradition = 100 }
+		}
+		if = {
+			limit = { adm_power = 999 }
+			add_adm_tech = 1 add_adm_power = -999
+		}
+		if = {
+			limit = { dip_power = 999 }
+			add_dip_tech = 1 add_dip_power = -999
+		}
+		if = {
+			limit = { mil_power = 999 }
+			add_mil_tech = 1 add_mil_power = -999
+		}
+	}
+}
+
+on_mil_development = {
+	if = { 
+		limit = { owned_by = event_target:player }
+		if = {
+			limit = { owner = { mil_tech = 7 } }
+			build_to_forcelimit = { infantry = 0.6 cavalry = 0.1 artillery = 0.3 }
+		}
+		else = {
+			build_to_forcelimit = { infantry = 0.8 cavalry = 0.2 }
+		}
+	}
+}
+
+on_dip_development = {
+	if = { 
+		limit = { owned_by = event_target:player }
+		if = {
+			limit = { has_port = yes }
+			build_to_forcelimit = { heavy_ship = 0.5 transport = 0.5 }
+		}
+	}
+}
+
+# root = location, from = losing country
+on_siege_won_province = {
+	if = { 
+		limit = {
+			controller = {
+				is_in_war = { attacker_leader = event_target:player }
+				NOT = { war_with = event_target:player }
+			}
+			owner = { war_with = event_target:player }
+		}
+		change_controller = event_target:player
+	}
+}
+
+# root = location, from = winner country
+on_battle_lost_province = {
+	if = { 
+		limit = { FROM = { ai = no } }
+		FROM = {
+			add_yearly_manpower = 1
+			add_war_exhaustion = -1
+			add_army_professionalism = 0.01
+		}
+	}
+}
