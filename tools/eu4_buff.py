@@ -26,6 +26,7 @@
    - 每次安装时读游戏目录和启用的 mod 的脚本(dlc_load.json)，找出随机触发的事件(on_actions 随机池、各 pulse、
      平均触发时间)，标出每个选项是不是“纯好处”(有好处且没有任何坏处；封装的脚本效果展开再算；接着触发别的
      事件的不算，后续好坏未知；立即效果里有坏处的事件，所有选项都不算)。例外：选项能得到继承人或统治者
+     (define_heir/define_ruler)这类重大好处的，即使有代价也算可选。例外：选项能得到继承人或统治者
      (define_heir/define_ruler)这类重大好处的，即使有代价也算可选。不写死事件清单，换 mod 也自动跟着变。
    - 运行时随机池检查玩家的事件时，用引擎自己的选项条件判断玩家当下能选哪些选项：能选的选项里有纯好处的才进
      随机池，否则对玩家判为不满足条件(不进池、不占权重)。AI 不受影响。
@@ -617,6 +618,8 @@ _EFF_ALWAYS_GOOD = {'add_core', 'add_claim', 'add_permanent_claim', 'add_territo
                     'define_heir', 'define_ruler', 'add_estate_privilege', 'set_estate_privilege', 'add_institution'}
 # 重大好处：选项里有这些，即使有代价也算可选
 _MAJOR_GOOD = ('define_heir', 'define_ruler')
+# 重大好处：选项里有这些，即使有代价也算可选
+_MAJOR_GOOD = ('define_heir', 'define_ruler')
 _EFF_MODIFIER = {'add_country_modifier', 'add_province_modifier', 'add_permanent_province_modifier',
                  'add_ruler_modifier', 'add_trade_modifier'}
 _EFF_SKIP = {'limit', 'trigger', 'ai_chance', 'name', 'tooltip', 'custom_tooltip', 'highlight', 'goto', 'modifier',
@@ -774,6 +777,8 @@ class EventAnalyzer:
             g, b = self.score(o)
             if g and not b and not imm_bad and not self._has_key(o, ('country_event', 'province_event')):
                 good |= 1 << n  # 纯好处：有好处、没有坏处，也不接着触发别的事件(后续好坏未知)
+            elif not imm_bad and self._has_key(o, _MAJOR_GOOD):
+                good |= 1 << n  # 重大好处(得到继承人/统治者)：有代价也算可选
             elif not imm_bad and self._has_key(o, _MAJOR_GOOD):
                 good |= 1 << n  # 重大好处(得到继承人/统治者)：有代价也算可选
             trig = [v for k, _, v in o if k == 'trigger' and isinstance(v, list)]
