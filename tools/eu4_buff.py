@@ -40,7 +40,7 @@
 用法
 ----
     Steam 启动项：  pythonw.exe 本脚本 %command%     (启动游戏并自动安装；之后游戏自己重启也会重装，
-                                                     游戏退出 10 分钟内没再启动才结束)
+                                                     游戏退出 1 分钟内没再启动才结束)
     手动安装：      pythonw.exe 本脚本 --install      (游戏已在运行时)
     撤销补丁：      pythonw.exe 本脚本 --remove
     查看特征码结果：python 本脚本 --status
@@ -706,7 +706,7 @@ def main():
     ap.add_argument("--wait-game", type=int, default=1800, help="等待 eu4.exe 启动的秒数(要经过启动器，默认 30 分钟)")
     ap.add_argument("--watch", action="store_true",
                     help="守候模式(Steam 启动项用)：每次 eu4.exe 启动(包括游戏自己重启)都装补丁，游戏退出后没再启动就结束")
-    ap.add_argument("--restart-wait", type=int, default=600, help="守候模式下游戏退出后等它重新启动的秒数(默认 10 分钟)")
+    ap.add_argument("--restart-wait", type=int, default=60, help="守候模式下游戏退出后等它重新启动的秒数(默认 1 分钟)")
     args, game_cmd = ap.parse_known_args()
     _quiet = sys.stdout is None or Path(sys.executable).name.lower() == "pythonw.exe"
     if args.status or args.remove:
