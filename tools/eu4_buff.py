@@ -25,7 +25,8 @@
 6. 随机池里只留有纯好处的事件：
    - 每次安装时读游戏目录和启用的 mod 的脚本(dlc_load.json)，找出随机触发的事件(on_actions 随机池、各 pulse、
      平均触发时间)，标出每个选项是不是“纯好处”(有好处且没有任何坏处；封装的脚本效果展开再算；接着触发别的
-     事件的不算，后续好坏未知；立即效果里有坏处的事件，所有选项都不算)。例外：选项能得到继承人或统治者
+     事件的不算，后续好坏未知；立即效果里有坏处的事件，所有选项都不算)。修正的好坏取游戏自己的修正定义
+     (从 eu4.exe 读出，即界面上数值显示绿色/红色的依据)，效果按同名修正的好坏算，不手写清单。例外：选项能得到继承人或统治者
      (define_heir/define_ruler)这类重大好处的，即使有代价也算可选。例外：选项能得到继承人或统治者
      (define_heir/define_ruler)这类重大好处的，即使有代价也算可选。不写死事件清单，换 mod 也自动跟着变。
    - 运行时随机池检查玩家的事件时，用引擎自己的选项条件判断玩家当下能选哪些选项：能选的选项里有纯好处的才进
@@ -377,6 +378,11 @@ SIGS = {
         "00 00 00 B8 A7 52 00 00 66 89 45 A0 44 88 6D A2 B8 A7 47 00 00 40 84 F6 75 ?? 4C 3B FB 74 ?? 45 "
         "84 E4 74 ?? B8 A7 59 00 00"
     ),
+    # 修正类型登记(初始化)：每种修正 mov [rbp+0x280] 标志 / +0x288 编号 / +0x290 令牌；标志第 1 位 = 正值是好处(界面绿色)
+    "MODREG": (
+        "40 55 53 48 8D AC 24 98 FD FF FF 48 81 EC 68 03 00 00 48 8B 05 ?? ?? ?? ?? 48 2B 05 ?? ?? ?? ?? "
+        "48 C1 F8 05 48 B9 AB AA AA AA AA AA AA AA"
+    ),
     # 成就：比较存档校验和，结果写到成就管理器 +1(存档校验通过)
     "ACHSAVE": "49 3B DC 75 ?? 4C 8B C3 E8 ?? ?? ?? ?? 85 C0 75 ?? B3 01 EB ?? 32 DB 41 88 5F 01",
     # 成就：设置成就管理器 +2(游戏未修改)
@@ -654,19 +660,13 @@ def merged_files(roots, sub):
     return [m[k] for k in sorted(m)]
 
 
-# 修正：值越大越坏的(其余默认越大越好)
-_MOD_BAD_UP = {
-    'global_unrest', 'local_unrest', 'war_exhaustion', 'global_autonomy', 'local_autonomy', 'min_autonomy',
-    'min_local_autonomy', 'interest', 'liberty_desire', 'ae_impact', 'aggressive_expansion_impact', 'land_attrition',
-    'naval_attrition', 'inflation', 'stability_cost_modifier', 'overextension_impact_modifier', 'unjustified_demands',
-    'monthly_war_exhaustion', 'yearly_corruption', 'yearly_absolutism_decrease', 'devastation', 'local_devastation',
-    'prestige_decay', 'harsh_treatment_cost', 'years_of_nationalism', 'local_years_of_nationalism',
-    'rebel_support_efficiency', 'local_rebel_support_efficiency', 'fire_damage_received', 'shock_damage_received',
-    'global_monthly_devastation', 'local_monthly_devastation', 'yearly_karma_decay', 'enemy_core_creation',
-}
-# 效果：值为正时是坏处的
-_EFF_POS_BAD = ('corruption', 'war_exhaustion', 'inflation', 'autonomy', 'devastation', 'nationalism', 'unrest',
-                'doom', 'liberty_desire', 'aggressive_expansion', 'overextension', 'heretic', 'rebel', 'karma')
+# 修正的好坏不手写：取游戏自己的修正定义(modifier_goodness 从 eu4.exe 读出，就是界面上显示绿色/红色的依据)。
+# 效果(add_xxx/change_xxx = 数值)按同名修正的好坏算(见 _EFF_MOD_CANDIDATES)；只有下面几个没有对应修正的效果，
+# 值为正是坏处：
+_EFF_POS_BAD_FALLBACK = ('inflation', 'devastation', 'doom', 'heretic', 'aggressive_expansion', 'overextension')
+# 效果名 X(去掉 add_/change_)依次对应这些修正名
+_EFF_MOD_CANDIDATES = ('{}', 'global_{}', 'local_{}', '{}_modifier', 'monthly_{}', 'yearly_{}', 'years_of_{}',
+                       '{}_impact')
 _EFF_ALWAYS_BAD = {'kill_heir', 'kill_advisor', 'remove_advisor', 'kill_consort', 'kill_units', 'remove_core',
                    'remove_claim', 'cede_province', 'add_loan', 'remove_estate_privilege', 'kill_leader', 'remove_heir',
                    'spawn_rebels'}
@@ -674,8 +674,6 @@ _EFF_ALWAYS_GOOD = {'add_core', 'add_claim', 'add_permanent_claim', 'add_territo
                     'create_admiral', 'create_explorer', 'create_conquistador', 'define_advisor', 'add_building',
                     'add_great_project_tier', 'hire_advisor', 'add_cb', 'add_casus_belli', 'add_idea', 'add_heir',
                     'define_heir', 'define_ruler', 'add_estate_privilege', 'set_estate_privilege', 'add_institution'}
-# 重大好处：选项里有这些，即使有代价也算可选
-_MAJOR_GOOD = ('define_heir', 'define_ruler')
 # 重大好处：选项里有这些，即使有代价也算可选
 _MAJOR_GOOD = ('define_heir', 'define_ruler')
 _EFF_MODIFIER = {'add_country_modifier', 'add_province_modifier', 'add_permanent_province_modifier',
@@ -694,17 +692,10 @@ def _num(v):
         return None
 
 
-def _mod_sign(name):
-    n = name.lower()
-    if n in _MOD_BAD_UP or n.endswith('_cost') or 'cost' in n.split('_') or n.endswith('_decay') \
-            or 'unrest' in n or 'rebel' in n or ('attrition' in n and 'hostile' not in n):
-        return -1
-    return 1
-
-
 class EventAnalyzer:
-    def __init__(self, roots):
+    def __init__(self, roots, modgood):
         self.roots = roots
+        self.modgood = modgood  # {修正名: 正值是好处}
         self.modifiers, self.scripted = {}, {}
         for sub, dst in (('common/event_modifiers', self.modifiers), ('common/static_modifiers', self.modifiers),
                          ('common/scripted_effects', self.scripted)):
@@ -714,12 +705,21 @@ class EventAnalyzer:
                         dst[k] = v
 
     def modifier_score(self, name):
+        """一组修正(event_modifiers 等里的定义)整体是好(1)/坏(-1)/说不清(0)：按游戏显示绿色/红色的项数。"""
         s = 0
         for k, _, v in self.modifiers.get(name, []):
             x = _num(v)
-            if x:
-                s += _mod_sign(k) * (1 if x > 0 else -1)
+            if x and k in self.modgood:
+                s += (1 if self.modgood[k] else -1) * (1 if x > 0 else -1)
         return (s > 0) - (s < 0)
+
+    def effect_positive_good(self, k):
+        """效果 add_X/change_X 的值为正是不是好处：取同名修正的好坏，没有对应修正时默认是好处。"""
+        x = k[4:] if k.startswith('add_') else k[7:] if k.startswith('change_') else k
+        for c in _EFF_MOD_CANDIDATES:
+            if c.format(x) in self.modgood:
+                return self.modgood[c.format(x)]
+        return not any(w in x for w in _EFF_POS_BAD_FALLBACK)
 
     def score(self, block, depth=0):
         """(好处项数, 坏处项数)。封装的脚本效果展开后再算。"""
@@ -747,7 +747,7 @@ class EventAnalyzer:
                                                             if kk in ('value', 'amount', 'loyalty', 'influence')))):
                 x = _num(v) if _num(v) else next(_num(vv) for kk, _, vv in v
                                                   if kk in ('value', 'amount', 'loyalty', 'influence') and _num(vv))
-                if (x > 0) != any(w in k for w in _EFF_POS_BAD):
+                if (x > 0) == self.effect_positive_good(k):
                     g += 1
                 else:
                     b += 1
@@ -845,16 +845,56 @@ class EventAnalyzer:
         return good, check, (1 << len(opts)) - 1
 
 
-def blob_badev(game_dir):
+def modifier_goodness(img):
+    """从 eu4.exe 读出游戏的修正定义：{修正名: 正值是好处}。
+    修正类型都在一个初始化函数(特征码 MODREG)里登记：mov [rbp+0x280], 标志(立即数，或由几次 mov edx,imm /
+    lea ecx,[rdx+d] 按位或得到)；mov [rbp+0x288], 编号；mov [rbp+0x290], 令牌；再调登记函数。标志第 1 位
+    (值 2)= 正值是好处，界面上据此把数值显示成绿色或红色。令牌编号对应的名字在 .data 的令牌表里(dword 编号 + 名字)。"""
+    hits = img.find_sig(SIGS["MODREG"])
+    if len(hits) != 1:
+        log("修正定义：特征码未命中，修正一律按说不清处理")
+        return {}
+    code = img.bytes_at(hits[0], 0x20000)
+    end = code.find(b"\xCC\xCC\xCC\xCC")
+    code = code[:end if end > 0 else len(code)]
+    flags = {}
+    for m in re.finditer(rb"\xC7\x85\x90\x02\x00\x00(....)", code, re.S):
+        tok, p = struct.unpack("<I", m.group(1))[0], m.start()
+        j = code.rfind(b"\x85\x80\x02\x00\x00", max(0, p - 0x40), p)
+        if j < 1:
+            continue
+        if code[j - 1] == 0xC7:
+            flags[tok] = struct.unpack_from("<I", code, j + 5)[0]
+        elif code[j - 1] == 0x89:
+            prev = max(code.rfind(b"\xC7\x85\x90\x02\x00\x00", 0, j - 1), 0)
+            fl, ed = 0, None
+            for mm in re.finditer(rb"\xBA(.)\x00\x00\x00|\x8D\x4A(.)", code[prev:j - 1], re.S):
+                if mm.group(1) is not None:
+                    ed = mm.group(1)[0]
+                    fl |= ed
+                elif ed is not None:
+                    fl |= (ed + struct.unpack("<b", mm.group(2))[0]) & 0xFF
+            flags[tok] = fl
+    d0, n = img.secs[".data"][:2]
+    data = img.bytes_at(d0, n)
+    names = {}
+    for m in re.finditer(rb"(?<=\x00)([\x01-\xFF][\x00-\xFF])\x00\x00([a-z_][a-z0-9_]{1,80})\x00", data):
+        names.setdefault(struct.unpack("<H", m.group(1))[0], m.group(2).decode())
+    good = {names[t]: bool(f & 2) for t, f in flags.items() if t in names}
+    log(f"修正定义：从 eu4.exe 读到 {len(good)} 种修正的好坏")
+    return good
+
+
+def blob_badev(img):
     """随机事件表：数量 + 按哈希升序的 {标题键哈希, 纯好处的选项位图, 检查可用性的选项位图}。"""
-    res = EventAnalyzer(content_roots(game_dir)).analyze()
+    res = EventAnalyzer(content_roots(img.path.parent), modifier_goodness(img)).analyze()
     ent = sorted((fnv1a64(t), g, c) for t, (g, c) in res.items())
     log(f"随机事件分析：{len(ent)} 个随机事件不一定有纯好处的选项(运行时看玩家能选的选项决定进不进随机池)")
     return struct.pack("<Q", len(ent)) + b"".join(struct.pack("<QQQ", *e) for e in ent)
 
 
 # 补丁内存里的数据块：键 -> 函数(img)，安装时生成
-BLOBS = {"@badev": lambda img: blob_badev(img.path.parent)}
+BLOBS = {"@badev": blob_badev}
 
 def rel_target(img, insn_rva, disp_off, insn_len):
     return insn_rva + insn_len + struct.unpack("<i", img.bytes_at(insn_rva + disp_off, 4))[0]
