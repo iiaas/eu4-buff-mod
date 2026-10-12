@@ -22,16 +22,11 @@
    - 玩家宣战或被宣战时，所有盟友像附庸一样直接加入战争，不需要对方同意、不消耗人情；
      宣战窗口里盟友和附庸一样显示为“强制参战”(不能取消)，并计入兵力对比。已被选作敌方共同交战国的除外。
    - 战争中用“召集参战”召集盟友仍照原版(要对方同意、消耗人情)。
-6. 随机池里只留有纯好处的事件：
-   - 每次安装时读游戏目录和启用的 mod 的脚本(dlc_load.json)，找出随机触发的事件(on_actions 随机池、各 pulse、
-     平均触发时间)，标出每个选项是不是“纯好处”(有好处且没有任何坏处；封装的脚本效果展开再算；接着触发别的
-     事件的不算，后续好坏未知；立即效果里有坏处的事件，所有选项都不算)。修正的好坏取游戏自己的修正定义
-     (从 eu4.exe 读出，即界面上数值显示绿色/红色的依据)，效果按同名修正的好坏算，不手写清单。例外：选项能得到继承人或统治者
-     (define_heir/define_ruler)这类重大好处的，即使有代价也算可选。例外：选项能得到继承人或统治者
-     (define_heir/define_ruler)这类重大好处的，即使有代价也算可选。不写死事件清单，换 mod 也自动跟着变。
-   - 运行时随机池检查玩家的事件时，用引擎自己的选项条件判断玩家当下能选哪些选项：能选的选项里有纯好处的才进
-     随机池，否则对玩家判为不满足条件(不进池、不占权重)。AI 不受影响。
-   - 会清除标记、结束事变/灾难等改流程状态的事件、隐藏事件不拦(拦了可能卡住事变等流程)。
+6. 随机事件按选项颜色拦截：随机触发的事件(on_actions 随机池、国家/省份平均触发时间)要对玩家触发时，
+   先过原版条件；然后对玩家当下能选的每个选项(用游戏自己的选项条件判断)，用游戏生成事件窗口里选项提示的函数
+   生成效果说明，看里面的颜色：有绿色是好选项，只有红色是坏选项，都没有算说不清。能选的选项全是坏选项，
+   这个事件对玩家判为不满足条件：随机池里不进(不占权重)，平均触发时间的不触发。有一个好选项或说不清的就照常。
+   被别的事件/决议直接调用的连锁事件、延迟事件、on_action 固定事件不拦。AI 不受影响。
 7. 相容所有宗教和文化：
    - 宗教：所有宗教对玩家都按本教算(引擎“是否本教”判断 0x36e300)，容忍度一律用本教容忍度，没有异端/异教的
      不满等惩罚；传教士也不会再去改宗(都算本教)。
@@ -344,11 +339,6 @@ SIGS = {
         "48 8B 85 50 03 00 00 48 8B 40 10 C7 44 24 60 01 00 00 00 48 89 44 24 64 C6 44 24 6C 00 0F 28 44 "
         "24 60 66 0F 7F 45 70 45 33 C0 48 8B 44 24 30 48 8B 90 B8 19 00 00"
     ),
-    # 事件能否触发(rcx 事件, rdx 作用域, 返回 al)：随机事件池 0x9426d0 用它逐个筛候选；事件 +0x7E0 标题键
-    "EVPOSSIBLE": (
-        "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 54 41 56 41 57 48 83 EC 20 80 B9 "
-        "64 0A 00 00 00 4C 8B E2 48 8B D9 74 ?? 80 3D ?? ?? ?? ?? 00 74 ?? 80 3D ?? ?? ?? ?? 00 74 ??"
-    ),
     # 某宗教对国家算不算本教(rcx 国家, rdx 宗教, r8 第二宗教)：国教、次要宗教、融合/调和宗教；容忍度 0x3003b0 先问它
     "RELOWN": (
         "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 56 41 57 48 83 EC 20 48 8B 99 38 0F 00 00 48 "
@@ -378,10 +368,22 @@ SIGS = {
         "00 00 00 B8 A7 52 00 00 66 89 45 A0 44 88 6D A2 B8 A7 47 00 00 40 84 F6 75 ?? 4C 3B FB 74 ?? 45 "
         "84 E4 74 ?? B8 A7 59 00 00"
     ),
-    # 修正类型登记(初始化)：每种修正 mov [rbp+0x280] 标志 / +0x288 编号 / +0x290 令牌；标志第 1 位 = 正值是好处(界面绿色)
-    "MODREG": (
-        "40 55 53 48 8D AC 24 98 FD FF FF 48 81 EC 68 03 00 00 48 8B 05 ?? ?? ?? ?? 48 2B 05 ?? ?? ?? ?? "
-        "48 C1 F8 05 48 B9 AB AA AA AA AA AA AA AA"
+    # 随机池抽取 0x9426d0 里调“事件能否触发”(rcx 事件, rdx 作用域)的 call(+0x11)
+    "POOLCALL": "48 8D 45 F8 49 89 85 C8 00 00 00 49 8B D5 49 8B CF E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ??",
+    # 国家平均触发时间事件(国家 +0x9958 列表)调“事件能否触发”的 call(+0x1E)
+    "CMTTHCALL": (
+        "48 8D 05 ?? ?? ?? ?? 48 89 45 E0 49 8B 46 20 44 89 65 08 48 89 45 0C 48 8D 55 E0 48 8B CB E8 ?? "
+        "?? ?? ?? 84 C0 74 ?? 4C 8D 45 E0 48 8B D3"
+    ),
+    # 省份平均触发时间事件(省份 +0x858 列表)调“事件能否触发”的 call(+0x13)
+    "PMTTHCALL": (
+        "49 8B 87 58 08 00 00 48 8B 1C F8 48 8D 54 24 70 48 8B CB E8 ?? ?? ?? ?? 84 C0 74 ?? 4C 8D 44 24 "
+        "70"
+    ),
+    # 事件说明 0x6ee110(事件, 字符串, 作用域, 选项序号)：+0x5F call 释放 std::string，+0xAC call 生成选项效果说明(选项, 字符串, 作用域, 0)
+    "TIPFN": (
+        "40 53 48 81 EC 90 00 00 00 48 8B DA 45 85 C9 79 ?? 48 81 C1 80 01 00 00 48 8B 01 33 D2 48 89 54 "
+        "24 48 48 C7 44 24 60 0F 00 00 00 48 89 54 24 58 88 54 24 30 89 54 24 28 48 8D 54 24 48"
     ),
     # 成就：比较存档校验和，结果写到成就管理器 +1(存档校验通过)
     "ACHSAVE": "49 3B DC 75 ?? 4C 8B C3 E8 ?? ?? ?? ?? 85 C0 75 ?? B3 01 EB ?? 32 DB 41 88 5F 01",
@@ -480,22 +482,6 @@ CAVES = {
         "751080b86f1e0000007407488b90681e00004889d148c1e93884c974144889d148c1e93080f907740848c1ea20"
         "440fb7d2c34889d148c1e93884c9740948c1ea20664439d2c380c901c3"
     ),
-    "EVPOOL": (
-        "0000000000000000000000000000000053565755415441554156415751524883ec284989cc4989d5e8d3010000"
-        "4983faff0f84b50100004d85ed0f84ac010000498d452c41807d4b007404498d4544488b104889d148c1e93884"
-        "c97535496345284885c00f88820100004869c0102e0000488b0d88ffffff488b094885c90f8468010000480381"
-        "a81c0000488b9068040000e8bf0100000f854f0100004d85e40f84460100004d8d8c24e00700004d8b59104d85"
-        "db0f84310100004981fb000100000f8724010000498379181072034d8b0948b825232284e49cf2cb48b9b30100"
-        "0000010000410fb6114831d0480fafc149ffc149ffcb75ed4c8b0d08ffffff4d85c90f84e30000004d8b194531"
-        "d24d39da0f83d40000004b8d0c1a48d1e9488d1449498b54d1084839c2740d72054989cbebdb4c8d5101ebd548"
-        "8d0449498d44c1084c8b7808488b5810498bb42490070000498bbc24980700004829f748c1ff034883ff400f87"
-        "800000004531f64531e44939fe735b4a8b04f64885c0744d4c0fa3f3733b486388bc000000488ba8b000000048"
-        "8d4ccd0048894c2420483b6c2420731c488b4d004885c9740d4c89ea488b01ff503084c074124883c508ebdd4d"
-        "0fa3f7722541bc0100000049ffc6eba04585e474154883c4285a59415f415e415d415c5d5f5e5b31c0c34883c4"
-        "285a59415f415e415d415c5d5f5e5beb6e49c7c2ffffffff488b05f2fdffff488b004885c0743f488b90601e00"
-        "0080b8661e000007751080b86f1e0000007407488b90681e00004889d148c1e93884c974144889d148c1e93080"
-        "f907740848c1ea20440fb7d2c34889d148c1e93884c9740948c1ea20664439d2c380c901c3"
-    ),
     "RETTRUE": (
         "00000000000000005152415250e82d0000004983faff7420488b4c24184885c97416488b5120e86a000000750b"
         "58415a5a59b801000000c358415a5a59eb6e49c7c2ffffffff488b05b3ffffff488b004885c0743f488b90601e"
@@ -515,12 +501,30 @@ CAVES = {
         "000007751080b86f1e0000007407488b90681e00004889d148c1e93884c974144889d148c1e93080f907740848"
         "c1ea20440fb7d2c34889d148c1e93884c9740948c1ea20664439d2c380c901c3"
     ),
+    "EVCOLOR": (
+        "000000000000000000000000000000000000000000000000000000000000000053565755415441554156415748"
+        "83ec704989cc4989d5ff15ccffffff84c00f84e7010000e8090200004983faff0f84dc0100004d85ed0f84d301"
+        "0000498d452c41807d4b007404498d4544488b104889d148c1e93884c97535496345284885c00f88a901000048"
+        "69c0102e0000488b0d6cffffff488b094885c90f848f010000480381a81c0000488b9068040000e8f50100000f"
+        "85760100004d85e40f846d010000498bb42490070000498bbc24980700004829f748c1ff034883ff400f874c01"
+        "00004531f64531ff4939fe0f83340100004a8b1cf64885db0f841f01000048638bbc000000488babb000000048"
+        "8d4ccd0048894c2440483b6c24407320488b4d004885c974114c89ea488b01ff503084c00f84e60000004883c5"
+        "08ebd9418b453c89442448418b45408944244c498b45184885c0740e8b483c894c24508b4840894c245431c048"
+        "894424204889442428488944243048c74424380f0000004889d9488d5424204d89e84531c9ff157dfeffff8b44"
+        "24484189453c8b44244c41894540498b45184885c0740e8b4c245089483c8b4c2454894840488d4c242048837c"
+        "2438107205488b4c2420488b54243031ed4883fa02722448ffca8039a7751480790147750583cd01eb09807901"
+        "52750383cd0248ffc148ffca75df488d4c2420ff1510fefffff7c501000000751ff7c502000000741741bf0100"
+        "000049ffc6e9c3feffff4585ff740431c0eb05b8010000004883c470415f415e415d415c5d5f5e5b4c8d1d7500"
+        "00004983c30541ffe349c7c2ffffffff488b05a0fdffff488b004885c0743f488b90601e000080b8661e000007"
+        "751080b86f1e0000007407488b90681e00004889d148c1e93884c974144889d148c1e93080f907740848c1ea20"
+        "440fb7d2c34889d148c1e93884c9740948c1ea20664439d2c380c901c3"
+    ),
 }
 
 # (名称, 特征码键, 挂钩处相对命中处的偏移, 被搬走的原指令长度, 机器码键, 数据区各项)
 # 数据区：glob = 游戏对象全局指针，dside = 战斗骰子面数(COMBAT_DICE_SIDE)，wipe = 原版全歼函数，
 #         direct = 召集循环里“盟友直接加入战争”的分支，
-#         @badev = 随机事件表(安装时分析游戏和 mod 的脚本生成，写在补丁内存里)，
+#         evposs = 事件能否触发(原版)，optip = 生成选项效果说明，strfree = 释放 std::string，
 #         cultskip = 省份文化修正里“主文化，不加惩罚”的出口
 HOOKS = (
     ("战斗骰子(新阶段)", "LANDDICE1", 0x12, 6, "DICE14", ("glob", "dside")),
@@ -533,7 +537,9 @@ HOOKS = (
     ("盟友像附庸一样直接参战", "ALLYJOIN", 0x30, 5, "ALLYJOIN", ("glob", "direct")),
     ("参战方列表里盟友算强制参战", "ALLYFLAG", 0x1D, 5, "ALLYFLAG", ("glob",)),
     ("玩家部队无损耗", "ATTRITION", 0, 5, "ATTR", ("glob",)),
-    ("玩家的随机池只留有纯好处的事件", "EVPOSSIBLE", 0, 5, "EVPOOL", ("glob", "@badev")),
+    ("随机池：玩家能选的选项全是红色的事件不进", "POOLCALL", 0x11, 5, "EVCOLOR", ("glob", "evposs", "optip", "strfree")),
+    ("国家平均触发时间事件：同上", "CMTTHCALL", 0x1E, 5, "EVCOLOR", ("glob", "evposs", "optip", "strfree")),
+    ("省份平均触发时间事件：同上", "PMTTHCALL", 0x13, 5, "EVCOLOR", ("glob", "evposs", "optip", "strfree")),
     ("所有宗教都按本教算", "RELOWN", 0, 5, "RETTRUE", ("glob",)),
     ("认可所有文化", "CULTACC", 0, 5, "RETTRUE", ("glob",)),
     ("省份没有非认可文化/同文化组惩罚", "CULTMOD", 0x4E, 11, "CULTSKIP", ("glob", "cultskip")),
@@ -557,344 +563,8 @@ DIRECT = (
 )
 
 
-def fnv1a64(s):
-    h = 0xCBF29CE484222325
-    for c in s.encode("utf-8"):
-        h = ((h ^ c) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
-    return h
-
-
-# ---------------------------------------------------------------------------
-# 恶性随机事件分析(安装时现算，不写死清单)
-# ---------------------------------------------------------------------------
-# 读游戏目录 + dlc_load.json 里启用的 mod 的脚本(后加载的同名文件覆盖前面的)，找出随机触发的事件
-# (on_actions 的 random_events、各 pulse 的 events、平均触发时间)，对每个选项判断是否“只有坏处”。
-# 结果按事件标题键做成表：每个事件一项 {标题键哈希, 纯好处的选项位图, 要在运行时检查可用性的选项位图}；
-# 运行时只看玩家当下能选的选项：其中有纯好处的(有好处且没有任何坏处)才进玩家的随机池，否则不进。
-
-_PDX_TOK = re.compile(r'\s+|#[^\n]*|"(?:[^"\\]|\\.)*"|[{}]|[<>!]?=|[<>]|[^\s{}=<>#"]+', re.S)
-_PDX_OPS = ('=', '<', '>', '<=', '>=', '!=', '==')
-
-
-def pdx_parse(s):
-    toks = [t for t in (m.group() for m in _PDX_TOK.finditer(s)) if not (t[0].isspace() or t[0] == '#')]
-    i = 0
-
-    def block():
-        nonlocal i
-        out = []
-        while i < len(toks):
-            t = toks[i]
-            if t == '}':
-                i += 1
-                return out
-            if i + 1 < len(toks) and toks[i + 1] in _PDX_OPS:
-                op = toks[i + 1]
-                i += 2
-                if i < len(toks) and toks[i] == '{':
-                    i += 1
-                    v = block()
-                else:
-                    v = toks[i].strip('"') if i < len(toks) else ''
-                    i += 1
-                out.append((t.strip('"'), op, v))
-            elif t == '{':
-                i += 1
-                out.append(('', None, block()))
-            else:
-                out.append((t.strip('"'), None, None))
-                i += 1
-        return out
-    return block()
-
-
-def pdx_read(path):
-    b = Path(path).read_bytes()
-    for enc in ('utf-8-sig', 'cp1252'):
-        try:
-            return b.decode(enc)
-        except UnicodeDecodeError:
-            pass
-    return b.decode('latin-1')
-
-
-def documents_dir():
-    """“我的文档”(可能被重定向)下的 EU4 目录。"""
-    try:
-        buf = ctypes.create_unicode_buffer(260)
-        if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf) == 0:
-            return Path(buf.value) / "Paradox Interactive" / "Europa Universalis IV"
-    except OSError:
-        pass
-    return Path.home() / "Documents" / "Paradox Interactive" / "Europa Universalis IV"
-
-
-def content_roots(game_dir):
-    """按加载顺序返回内容目录：游戏目录，然后 dlc_load.json 里启用的 mod。"""
-    roots = [Path(game_dir)]
-    doc = documents_dir()
-    try:
-        mods = json.loads((doc / "dlc_load.json").read_text(encoding="utf-8")).get("enabled_mods", [])
-    except (OSError, ValueError):
-        mods = []
-    for m in mods:
-        try:
-            desc = pdx_parse(pdx_read(doc / m))
-        except OSError:
-            continue
-        for k, _, v in desc:
-            if k == "path" and isinstance(v, str):
-                p = Path(v)
-                roots.append(p if p.is_absolute() else doc / p)
-    return roots
-
-
-def merged_files(roots, sub):
-    m = {}
-    for r in roots:
-        d = r / sub
-        if d.is_dir():
-            for f in d.iterdir():
-                if f.suffix.lower() == ".txt":
-                    m[f.name] = f
-    return [m[k] for k in sorted(m)]
-
-
-# 修正的好坏不手写：取游戏自己的修正定义(modifier_goodness 从 eu4.exe 读出，就是界面上显示绿色/红色的依据)。
-# 效果(add_xxx/change_xxx = 数值)按同名修正的好坏算(见 _EFF_MOD_CANDIDATES)；只有下面几个没有对应修正的效果，
-# 值为正是坏处：
-_EFF_POS_BAD_FALLBACK = ('inflation', 'devastation', 'doom', 'heretic', 'aggressive_expansion', 'overextension')
-# 效果名 X(去掉 add_/change_)依次对应这些修正名
-_EFF_MOD_CANDIDATES = ('{}', 'global_{}', 'local_{}', '{}_modifier', 'monthly_{}', 'yearly_{}', 'years_of_{}',
-                       '{}_impact')
-_EFF_ALWAYS_BAD = {'kill_heir', 'kill_advisor', 'remove_advisor', 'kill_consort', 'kill_units', 'remove_core',
-                   'remove_claim', 'cede_province', 'add_loan', 'remove_estate_privilege', 'kill_leader', 'remove_heir',
-                   'spawn_rebels'}
-_EFF_ALWAYS_GOOD = {'add_core', 'add_claim', 'add_permanent_claim', 'add_territorial_core', 'create_general',
-                    'create_admiral', 'create_explorer', 'create_conquistador', 'define_advisor', 'add_building',
-                    'add_great_project_tier', 'hire_advisor', 'add_cb', 'add_casus_belli', 'add_idea', 'add_heir',
-                    'define_heir', 'define_ruler', 'add_estate_privilege', 'set_estate_privilege', 'add_institution'}
-# 重大好处：选项里有这些，即使有代价也算可选
-_MAJOR_GOOD = ('define_heir', 'define_ruler')
-_EFF_MODIFIER = {'add_country_modifier', 'add_province_modifier', 'add_permanent_province_modifier',
-                 'add_ruler_modifier', 'add_trade_modifier'}
-_EFF_SKIP = {'limit', 'trigger', 'ai_chance', 'name', 'tooltip', 'custom_tooltip', 'highlight', 'goto', 'modifier',
-             'factor', 'chance', 'duration', 'who', 'type', 'desc', 'text', 'title', 'picture', 'id', 'days',
-             'months', 'years', 'key', 'hidden'}
-_STATE = re.compile(r'^(clr_\w*flag|end_incident|end_disaster|set_variable|change_variable|subtract_variable|'
-                    r'start_incident|start_disaster)$')
-
-
-def _num(v):
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return None
-
-
-class EventAnalyzer:
-    def __init__(self, roots, modgood):
-        self.roots = roots
-        self.modgood = modgood  # {修正名: 正值是好处}
-        self.modifiers, self.scripted = {}, {}
-        for sub, dst in (('common/event_modifiers', self.modifiers), ('common/static_modifiers', self.modifiers),
-                         ('common/scripted_effects', self.scripted)):
-            for f in merged_files(roots, sub):
-                for k, _, v in pdx_parse(pdx_read(f)):
-                    if isinstance(v, list):
-                        dst[k] = v
-
-    def modifier_score(self, name):
-        """一组修正(event_modifiers 等里的定义)整体是好(1)/坏(-1)/说不清(0)：按游戏显示绿色/红色的项数。"""
-        s = 0
-        for k, _, v in self.modifiers.get(name, []):
-            x = _num(v)
-            if x and k in self.modgood:
-                s += (1 if self.modgood[k] else -1) * (1 if x > 0 else -1)
-        return (s > 0) - (s < 0)
-
-    def effect_positive_good(self, k):
-        """效果 add_X/change_X 的值为正是不是好处：取同名修正的好坏，没有对应修正时默认是好处。"""
-        x = k[4:] if k.startswith('add_') else k[7:] if k.startswith('change_') else k
-        for c in _EFF_MOD_CANDIDATES:
-            if c.format(x) in self.modgood:
-                return self.modgood[c.format(x)]
-        return not any(w in x for w in _EFF_POS_BAD_FALLBACK)
-
-    def score(self, block, depth=0):
-        """(好处项数, 坏处项数)。封装的脚本效果展开后再算。"""
-        g = b = 0
-        if depth > 12:
-            return 0, 0
-        for k, _, v in block:
-            if not k or k in _EFF_SKIP:
-                continue
-            if k in self.scripted:
-                x, y = self.score(self.scripted[k], depth + 1)
-                g, b = g + x, b + y
-            elif k in _EFF_ALWAYS_BAD or k.endswith('_rebels'):
-                b += 1
-            elif k in _EFF_ALWAYS_GOOD:
-                g += 1
-            elif k in _EFF_MODIFIER and isinstance(v, list):
-                d = {kk: vv for kk, _, vv in v}
-                s = self.modifier_score(d.get('name')) if d.get('name') else 0
-                if not s and _num(d.get('power')):  # add_trade_modifier { power = -10 }
-                    s = 1 if _num(d.get('power')) > 0 else -1
-                g, b = g + (s > 0), b + (s < 0)
-            elif (k.startswith('add_') or k.startswith('change_')) and (
-                    _num(v) or (isinstance(v, list) and any(_num(vv) for kk, _, vv in v
-                                                            if kk in ('value', 'amount', 'loyalty', 'influence')))):
-                x = _num(v) if _num(v) else next(_num(vv) for kk, _, vv in v
-                                                  if kk in ('value', 'amount', 'loyalty', 'influence') and _num(vv))
-                if (x > 0) == self.effect_positive_good(k):
-                    g += 1
-                else:
-                    b += 1
-            elif isinstance(v, list):
-                x, y = self.score(v, depth + 1)
-                g, b = g + x, b + y
-        return g, b
-
-    @staticmethod
-    def _touches_state(block):
-        for k, _, v in block:
-            if _STATE.match(k or '') or (isinstance(v, list) and EventAnalyzer._touches_state(v)):
-                return True
-        return False
-
-    @staticmethod
-    def _has_key(block, keys):
-        for k, _, v in block:
-            if k in keys or (isinstance(v, list) and EventAnalyzer._has_key(v, keys)):
-                return True
-        return False
-
-    @staticmethod
-    def _mentions(block, word):
-        for k, _, v in block:
-            if word in (k or '') or (isinstance(v, str) and word in v) or \
-                    (isinstance(v, list) and EventAnalyzer._mentions(v, word)):
-                return True
-        return False
-
-    def analyze(self):
-        """返回 {标题键: (纯好处的选项位图, 运行时检查可用性的选项位图)}，只含可能被拦的事件。"""
-        events = {}
-        for f in merged_files(self.roots, 'events'):
-            for k, _, v in pdx_parse(pdx_read(f)):
-                if k in ('country_event', 'province_event') and isinstance(v, list):
-                    d = {}
-                    for kk, _, vv in v:
-                        d.setdefault(kk, []).append(vv)
-                    if d.get('id'):
-                        events[d['id'][0]] = d
-        rnd = set()
-        for f in merged_files(self.roots, 'common/on_actions'):
-            for k, _, v in pdx_parse(pdx_read(f)):
-                if not isinstance(v, list):
-                    continue
-                for kk, _, vv in v:
-                    if kk == 'random_events' and isinstance(vv, list):
-                        rnd |= {e for _, _, e in vv if isinstance(e, str) and e != '0'}
-                    elif kk == 'events' and 'pulse' in k and isinstance(vv, list):
-                        rnd |= {e for e, _, _ in vv if e}
-        for i, d in events.items():
-            if 'mean_time_to_happen' in d and d.get('is_triggered_only', ['no'])[0] != 'yes':
-                rnd.add(i)
-        by_title = {}
-        for i, d in events.items():
-            t = d.get('title', [None])[0]
-            if isinstance(t, str):
-                by_title.setdefault(t, []).append(i)
-        out = {}
-        for i in rnd:
-            d = events.get(i)
-            t = d.get('title', [None])[0] if d else None
-            if not isinstance(t, str) or t in out:
-                continue
-            # 按标题键识别：共用这个标题的事件(包括非随机的)判定结果都一样才能拦，否则区分不开就不拦
-            masks = {self._masks(events[j]) for j in by_title[t]}
-            m = masks.pop() if len(masks) == 1 else None
-            out[t] = m if m and m[0] != m[2] else None
-        return {t: (g, c) for t, v in out.items() if v for g, c, _ in [v]}
-
-    def _masks(self, d):
-        """(纯好处的选项位图, 检查可用性的选项位图, 全部选项位图)；不该拦的事件返回 None。"""
-        if d.get('hidden', ['no'])[0] == 'yes':
-            return None
-        opts = [o for o in d.get('option', []) if isinstance(o, list)]
-        if not opts or len(opts) > 64:
-            return None
-        if any(isinstance(v, list) and self._touches_state(v)
-               for key in ('option', 'immediate', 'after') for v in d.get(key, [])):
-            return None
-        imm_bad = any(isinstance(v, list) and self.score(v)[1] for v in d.get('immediate', []))
-        good = check = 0
-        for n, o in enumerate(opts):
-            g, b = self.score(o)
-            if g and not b and not imm_bad and not self._has_key(o, ('country_event', 'province_event')):
-                good |= 1 << n  # 纯好处：有好处、没有坏处，也不接着触发别的事件(后续好坏未知)
-            elif not imm_bad and self._has_key(o, _MAJOR_GOOD):
-                good |= 1 << n  # 重大好处(得到继承人/统治者)：有代价也算可选
-            elif not imm_bad and self._has_key(o, _MAJOR_GOOD):
-                good |= 1 << n  # 重大好处(得到继承人/统治者)：有代价也算可选
-            trig = [v for k, _, v in o if k == 'trigger' and isinstance(v, list)]
-            if trig and not any(self._mentions(tb, 'event_target') for tb in trig):
-                check |= 1 << n  # 有选项条件：运行时问引擎能不能选(用到事件目标的当作能选)
-        return good, check, (1 << len(opts)) - 1
-
-
-def modifier_goodness(img):
-    """从 eu4.exe 读出游戏的修正定义：{修正名: 正值是好处}。
-    修正类型都在一个初始化函数(特征码 MODREG)里登记：mov [rbp+0x280], 标志(立即数，或由几次 mov edx,imm /
-    lea ecx,[rdx+d] 按位或得到)；mov [rbp+0x288], 编号；mov [rbp+0x290], 令牌；再调登记函数。标志第 1 位
-    (值 2)= 正值是好处，界面上据此把数值显示成绿色或红色。令牌编号对应的名字在 .data 的令牌表里(dword 编号 + 名字)。"""
-    hits = img.find_sig(SIGS["MODREG"])
-    if len(hits) != 1:
-        log("修正定义：特征码未命中，修正一律按说不清处理")
-        return {}
-    code = img.bytes_at(hits[0], 0x20000)
-    end = code.find(b"\xCC\xCC\xCC\xCC")
-    code = code[:end if end > 0 else len(code)]
-    flags = {}
-    for m in re.finditer(rb"\xC7\x85\x90\x02\x00\x00(....)", code, re.S):
-        tok, p = struct.unpack("<I", m.group(1))[0], m.start()
-        j = code.rfind(b"\x85\x80\x02\x00\x00", max(0, p - 0x40), p)
-        if j < 1:
-            continue
-        if code[j - 1] == 0xC7:
-            flags[tok] = struct.unpack_from("<I", code, j + 5)[0]
-        elif code[j - 1] == 0x89:
-            prev = max(code.rfind(b"\xC7\x85\x90\x02\x00\x00", 0, j - 1), 0)
-            fl, ed = 0, None
-            for mm in re.finditer(rb"\xBA(.)\x00\x00\x00|\x8D\x4A(.)", code[prev:j - 1], re.S):
-                if mm.group(1) is not None:
-                    ed = mm.group(1)[0]
-                    fl |= ed
-                elif ed is not None:
-                    fl |= (ed + struct.unpack("<b", mm.group(2))[0]) & 0xFF
-            flags[tok] = fl
-    d0, n = img.secs[".data"][:2]
-    data = img.bytes_at(d0, n)
-    names = {}
-    for m in re.finditer(rb"(?<=\x00)([\x01-\xFF][\x00-\xFF])\x00\x00([a-z_][a-z0-9_]{1,80})\x00", data):
-        names.setdefault(struct.unpack("<H", m.group(1))[0], m.group(2).decode())
-    good = {names[t]: bool(f & 2) for t, f in flags.items() if t in names}
-    log(f"修正定义：从 eu4.exe 读到 {len(good)} 种修正的好坏")
-    return good
-
-
-def blob_badev(img):
-    """随机事件表：数量 + 按哈希升序的 {标题键哈希, 纯好处的选项位图, 检查可用性的选项位图}。"""
-    res = EventAnalyzer(content_roots(img.path.parent), modifier_goodness(img)).analyze()
-    ent = sorted((fnv1a64(t), g, c) for t, (g, c) in res.items())
-    log(f"随机事件分析：{len(ent)} 个随机事件不一定有纯好处的选项(运行时看玩家能选的选项决定进不进随机池)")
-    return struct.pack("<Q", len(ent)) + b"".join(struct.pack("<QQQ", *e) for e in ent)
-
-
-# 补丁内存里的数据块：键 -> 函数(img)，安装时生成
-BLOBS = {"@badev": blob_badev}
+# 补丁内存里的数据块：键 -> 函数(img)，安装时生成(目前没有)
+BLOBS = {}
 
 def rel_target(img, insn_rva, disp_off, insn_len):
     return insn_rva + insn_len + struct.unpack("<i", img.bytes_at(insn_rva + disp_off, 4))[0]
@@ -939,6 +609,17 @@ def resolve(img):
         R["direct"] = e - 0x30 + 0x27 + img.bytes_at(e - 0x30 + 0x26, 1)[0]
     elif e is not None:
         problems.append("盟友直接加入战争的分支: 找不到")
+    # 事件能否触发(原版)：随机池调用点上的 call 目标
+    e = R.get("entry:随机池：玩家能选的选项全是红色的事件不进")
+    if e is not None and img.bytes_at(e, 1) == b"\xe8":
+        R["evposs"] = rel_target(img, e, 1, 5)
+    # 生成选项效果说明、释放字符串：事件说明函数(特征码 TIPFN)里 +0xAC、+0x5F 两处 call 的目标
+    hits = img.find_sig(SIGS["TIPFN"])
+    if len(hits) == 1 and img.bytes_at(hits[0] + 0xAC, 1) == b"\xe8" and img.bytes_at(hits[0] + 0x5F, 1) == b"\xe8":
+        R["optip"] = rel_target(img, hits[0] + 0xAC, 1, 5)
+        R["strfree"] = rel_target(img, hits[0] + 0x5F, 1, 5)
+    else:
+        problems.append("生成选项说明的函数: 特征码未命中")
     # 省份文化修正里“主文化，不加惩罚”的出口：挂钩处 +0xB 的 je(0F 84 rel32)目标
     e = R.get("entry:省份没有非认可文化/同文化组惩罚")
     if e is not None and img.bytes_at(e + 0xB, 2) == b"\x0f\x84":
