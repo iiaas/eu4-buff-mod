@@ -1085,10 +1085,14 @@ def watch(wait_first, restart_wait):
     """守候：游戏在对局中返回主菜单等情况会自己重启 eu4.exe，新进程不经过 Steam 启动项，
     所以这里一直守着，每出现一个新的 eu4.exe 就装一次补丁；游戏退出后 restart_wait 秒内没再启动就结束。
     脚本文件被更新时：撤销本进程装的补丁，起一个新守候进程(用新脚本，重新装到正在运行的游戏上)，本进程退出。"""
+    # 已有守候进程：可能是换版本时旧进程还没退出，也可能旧进程正处在“游戏退出后等它重启”的那一分钟里，
+    # 而游戏是重新从 Steam 启动的(经过启动器，可能超过一分钟才出现 eu4.exe)。等旧进程结束再接手，
+    # 旧进程已经接上游戏的话就一直等不到，到时退出即可。
     mutex = None
-    for _ in range(30):  # 刚被旧守候进程换下来时，旧进程可能还没退出：等它放开互斥量
+    deadline = time.time() + restart_wait + 30
+    while True:
         mutex = P.single_instance(r"Local\eu4_buff_watch")
-        if mutex is not None:
+        if mutex is not None or time.time() > deadline:
             break
         time.sleep(0.5)
     if mutex is None:
