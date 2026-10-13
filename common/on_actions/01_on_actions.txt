@@ -54,20 +54,6 @@ on_monthly_pulse = {
 		every_war_enemy_country = {
 			add_spy_network_from = { who = ROOT value = 100 }
 		}
-		if = {
-			limit = { NOT = { employed_advisor = { category = ADM } } }
-			hire_advisor = { skill = 5 cost_multiplier = 0 type = natural_scientist }
-		}
-		if = {
-			limit = { NOT = { employed_advisor = { category = DIP } } }
-			hire_advisor = { skill = 5 cost_multiplier = 0 type = trader }
-			create_admiral = { tradition = 100 }
-		}
-		if = {
-			limit = { NOT = { employed_advisor = { category = MIL } } }
-			hire_advisor = { skill = 5 cost_multiplier = 0 type = army_reformer }
-			create_general = { tradition = 100 }
-		}
 	}
 }
 
