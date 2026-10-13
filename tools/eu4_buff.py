@@ -75,7 +75,8 @@ import traceback
 from ctypes import wintypes
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
+SELF = Path(__file__).resolve()
+HERE = SELF.parent
 LOG = Path(os.environ.get("TEMP", str(HERE))) / "eu4_buff.log"
 EXE = "eu4.exe"
 _quiet = False
@@ -147,11 +148,14 @@ class P:
         return h
 
     @staticmethod
-    def wait_exit(h):
-        """等进程(h)退出。"""
+    def wait_exit(h, ms=0xFFFFFFFF):
+        """等进程(h)退出，最多 ms 毫秒。退出了返回 True(并关闭句柄)，超时返回 False。"""
         P.k32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-        P.k32.WaitForSingleObject(h, 0xFFFFFFFF)
+        P.k32.WaitForSingleObject.restype = wintypes.DWORD
+        if P.k32.WaitForSingleObject(h, ms) == 0x102:  # WAIT_TIMEOUT
+            return False
         P.k32.CloseHandle(h)
+        return True
 
     @staticmethod
     def single_instance(name):
@@ -159,9 +163,10 @@ class P:
         P.k32.CreateMutexW.restype = wintypes.HANDLE
         P.k32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
         h = P.k32.CreateMutexW(None, False, name)
-        if not h or ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+        if h and ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS：关掉这个句柄，免得一直占着互斥量
+            P.k32.CloseHandle(h)
             return None
-        return h
+        return h or None
 
     @staticmethod
     def module_base(h):
@@ -944,11 +949,13 @@ def remove_all(h, base, img):
     return n
 
 
-def attach(wait_seconds):
-    """等 eu4.exe 出现且代码段可读。返回 (h, base, img, pid) 或 None。"""
+def attach(wait_seconds, stop=None):
+    """等 eu4.exe 出现且代码段可读。返回 (h, base, img, pid)；超时返回 None；stop() 为真时返回 "stop"。"""
     deadline = time.time() + wait_seconds
     img = None
     while time.time() < deadline:
+        if stop is not None and stop():
+            return "stop"
         pid = P.find_pid(EXE)
         if pid:
             try:
@@ -1011,14 +1018,7 @@ def main():
         except OSError as e:
             log(f"启动游戏失败: {e!r}；收到的参数: {game_cmd!r}")
             return
-        cmd = [sys.executable, str(Path(__file__).resolve()), "--watch", "--wait-game", str(args.wait_game),
-               "--restart-wait", str(args.restart_wait)]
-        # 守候进程在游戏退出后还会等一会儿：尽量脱离 Steam 的作业对象(CREATE_BREAKAWAY_FROM_JOB)，
-        # 免得 Steam 一直显示游戏在运行；不允许脱离时照常启动
-        try:
-            subprocess.Popen(cmd, creationflags=0x00000008 | 0x08000000 | 0x01000000, close_fds=True)
-        except OSError:
-            subprocess.Popen(cmd, creationflags=0x00000008 | 0x08000000, close_fds=True)
+        spawn_watch(args.wait_game, args.restart_wait)
         log(f"已启动游戏: {game_cmd[0]}")
         return
     if args.watch:
@@ -1036,17 +1036,83 @@ def main():
     log(f"补丁结果 (pid {pid}): " + "；".join(f"{n}:{r}" for n, r in res))
 
 
+def spawn_watch(wait_game, restart_wait):
+    """另起一个守候进程(不显示窗口)。"""
+    import subprocess
+    cmd = [sys.executable, str(SELF), "--watch", "--wait-game", str(wait_game), "--restart-wait", str(restart_wait)]
+    # 守候进程在游戏退出后还会等一会儿：尽量脱离 Steam 的作业对象(CREATE_BREAKAWAY_FROM_JOB)，
+    # 免得 Steam 一直显示游戏在运行；不允许脱离时照常启动
+    try:
+        subprocess.Popen(cmd, creationflags=0x00000008 | 0x08000000 | 0x01000000, close_fds=True)
+    except OSError:
+        subprocess.Popen(cmd, creationflags=0x00000008 | 0x08000000, close_fds=True)
+
+
+class SelfUpdate:
+    """守候进程运行期间脚本文件被改了：等文件写完(两次检查大小和时间都不变)且能编译，才算有新版本。"""
+
+    def __init__(self):
+        self.stamp = self._stamp()
+        self.pending = None
+        self.bad = None
+
+    @staticmethod
+    def _stamp():
+        try:
+            st = SELF.stat()
+            return st.st_mtime_ns, st.st_size
+        except OSError:
+            return None
+
+    def ready(self):
+        cur = self._stamp()
+        if cur is None or cur == self.stamp or cur == self.bad:
+            self.pending = None
+            return False
+        if cur != self.pending:
+            self.pending = cur
+            return False
+        try:
+            compile(SELF.read_text(encoding="utf-8"), str(SELF), "exec")
+        except Exception as e:
+            log(f"脚本已修改但不能编译，继续用旧版本: {e!r}")
+            self.bad = cur
+            return False
+        return True
+
+
 def watch(wait_first, restart_wait):
     """守候：游戏在对局中返回主菜单等情况会自己重启 eu4.exe，新进程不经过 Steam 启动项，
-    所以这里一直守着，每出现一个新的 eu4.exe 就装一次补丁；游戏退出后 restart_wait 秒内没再启动就结束。"""
-    mutex = P.single_instance(r"Local\eu4_buff_watch")
+    所以这里一直守着，每出现一个新的 eu4.exe 就装一次补丁；游戏退出后 restart_wait 秒内没再启动就结束。
+    脚本文件被更新时：撤销本进程装的补丁，起一个新守候进程(用新脚本，重新装到正在运行的游戏上)，本进程退出。"""
+    mutex = None
+    for _ in range(30):  # 刚被旧守候进程换下来时，旧进程可能还没退出：等它放开互斥量
+        mutex = P.single_instance(r"Local\eu4_buff_watch")
+        if mutex is not None:
+            break
+        time.sleep(0.5)
     if mutex is None:
         log("已有守候进程在运行，本进程退出")
         return
+    upd = SelfUpdate()
+
+    def handover(h=None, base=None, img=None):
+        if h is not None:
+            n = remove_all(h, base, img)
+            P.k32.CloseHandle(h)
+            log(f"脚本已更新：撤销旧补丁 {n} 处，换用新版本守候进程")
+        else:
+            log("脚本已更新：换用新版本守候进程")
+        P.k32.CloseHandle(mutex)
+        spawn_watch(wait_first, restart_wait)
+
     timeout = wait_first
     errors = 0
     while True:
-        a = attach(timeout)
+        a = attach(timeout, upd.ready)
+        if a == "stop":
+            handover()
+            return
         if not a:
             log("没有等到 eu4.exe 启动，守候结束")
             return
@@ -1065,7 +1131,10 @@ def watch(wait_first, restart_wait):
             continue
         errors = 0
         log(f"补丁结果 (pid {pid}): " + "；".join(f"{n}:{r}" for n, r in res))
-        P.wait_exit(h)
+        while not P.wait_exit(h, 2000):
+            if upd.ready():
+                handover(h, base, img)
+                return
         log(f"eu4.exe (pid {pid}) 已退出，等待游戏重新启动")
         timeout = restart_wait
 
