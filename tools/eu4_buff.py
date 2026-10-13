@@ -35,6 +35,11 @@
      不满等惩罚；传教士也不会再去改宗(都算本教)。
    - 文化：玩家认可所有文化(“是否认可文化”判断 0x2fc3e0，触发器等用它)，玩家省份不加“非认可文化”
      “同文化组”修正(税收、人力、不满)；文化自身的修正照常。省份界面里玩家省份的文化名也按认可文化显示(绿色)。
+7b. 属国按帝国诸侯算：神圣罗马帝国撤销上诉特权后，皇帝的帝国诸侯属国不占外交关系、相对实力(独立倾向)
+   只和自己比；玩家的属国走原版这两处同样的分支：
+   - 外交关系名额(0xa752b0)：宗主是玩家的属国关系不占名额(属国类型本来就不占的照旧)。
+   - 独立倾向里的相对实力(0x3b22d0)：玩家属国的 relative_power_class 改为 1，只拿它自己(和支持它独立的国家)
+     跟玩家比，不再把同类属国加在一起；本来不算相对实力的(朝贡国、殖民地等，类 0)照旧。
 8. 成就(对所有人生效)：装了 mod、改过的游戏/存档、非铁人模式也能获得成就。
    - 脚本触发器 ironman 恒按“是铁人”判断(成就条件里都写了 ironman = yes)，
      所以其他脚本里的 ironman 判断也会受影响。
@@ -62,6 +67,7 @@ import re
 import struct
 import sys
 import time
+import traceback
 from ctypes import wintypes
 from pathlib import Path
 
@@ -342,6 +348,18 @@ SIGS = {
         "48 8B 85 50 03 00 00 48 8B 40 10 C7 44 24 60 01 00 00 00 48 89 44 24 64 C6 44 24 6C 00 0F 28 44 "
         "24 60 66 0F 7F 45 70 45 33 C0 48 8B 44 24 30 48 8B 90 B8 19 00 00"
     ),
+    # 外交关系占不占名额 0xa752b0(rdi 关系条目：+8 宗主，+0x10 属国)：+0xE 比较宗主是不是皇帝，+0x44 帝国诸侯不占名额的返回
+    "SUBJSLOT": (
+        "4C 8B 0D ?? ?? ?? ?? 49 8B 89 E0 15 00 00 48 8B 47 08 48 C1 E8 20 48 C1 E9 20 66 3B C1 75 ?? 48 "
+        "8B 05 ?? ?? ?? ?? 49 C1 EA 20 49 0F BF CA 48 8B 80 18 01 00 00 48 8B 0C C8 48 8B 81 B0 14 00 00 "
+        "F6 80 58 09 00 00 20 74 ?? 41 38 B1 D2 1A 00 00 74 ?? 32 C0 E9 ?? ?? ?? ?? 48 8B 41 08 EB ??"
+    ),
+    # 属国相对实力 0x3b22d0 里(r9 宗主，rbx 属国，[rbp+0x1A0] relative_power_class)：+0x14 比较宗主是不是皇帝，帝国诸侯改为 1
+    "SUBJPOWER": (
+        "4C 8B 2D ?? ?? ?? ?? 41 BF E8 03 00 00 48 8B 15 ?? ?? ?? ?? 48 8B 8A E0 15 00 00 48 C1 E9 20 49 "
+        "8B 41 20 48 C1 E8 20 66 3B C1 75 ?? 48 8B 83 B0 14 00 00 F6 80 58 09 00 00 20 74 ?? 8B 8D A0 01 "
+        "00 00 B8 01 00 00 00 80 BA D2 1A 00 00 00 0F 45 C8 89 8D A0 01 00 00"
+    ),
     # 某宗教对国家算不算本教(rcx 国家, rdx 宗教, r8 第二宗教)：国教、次要宗教、融合/调和宗教；容忍度 0x3003b0 先问它
     "RELOWN": (
         "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 56 41 57 48 83 EC 20 48 8B 99 38 0F 00 00 48 "
@@ -610,6 +628,18 @@ CAVES = {
         "8b90601e000080b8661e000007751080b86f1e0000007407488b90681e00004889d148c1e93884c974144889d1"
         "48c1e93080f907740848c1ea20440fb7d2c34889d148c1e93884c9740948c1ea20664439d2c380c901c3"
     ),
+    "SUBJSLOT": (
+        "000000000000000000000000000000005051524152e823000000488b57084983faff7412e86a000000750b415a"
+        "5a5958ff25d2ffffff415a5a5958eb6e49c7c2ffffffff488b05b5ffffff488b004885c0743f488b90601e0000"
+        "80b8661e000007751080b86f1e0000007407488b90681e00004889d148c1e93884c974144889d148c1e93080f9"
+        "07740848c1ea20440fb7d2c34889d148c1e93884c9740948c1ea20664439d2c380c901c3"
+    ),
+    "SUBJPOWER": (
+        "00000000000000005051524152e82b000000498b51204983faff741ae872000000751383bda001000000740ac7"
+        "85a001000001000000415a5a5958eb6e49c7c2ffffffff488b05b5ffffff488b004885c0743f488b90601e0000"
+        "80b8661e000007751080b86f1e0000007407488b90681e00004889d148c1e93884c974144889d148c1e93080f9"
+        "07740848c1ea20440fb7d2c34889d148c1e93884c9740948c1ea20664439d2c380c901c3"
+    ),
 }
 
 # (名称, 特征码键, 挂钩处相对命中处的偏移, 被搬走的原指令长度, 机器码键, 数据区各项)
@@ -636,6 +666,8 @@ HOOKS = (
      ("glob", "optip", "strfree", "cskip", "heirvt", "blockiter", "@evstats")),
     ("省份平均触发时间：坏事件不发生", "PMTTHFN", 0x3A3, 7, "PMTTHBLOCK",
      ("glob", "optip", "strfree", "pskip", "heirvt", "blockiter", "@evstats")),
+    ("玩家的属国不占外交关系(同撤销上诉特权后的帝国诸侯)", "SUBJSLOT", 0xE, 8, "SUBJSLOT", ("glob", "slotno")),
+    ("玩家属国的相对实力只算自己(同撤销上诉特权后的帝国诸侯)", "SUBJPOWER", 0x14, 7, "SUBJPOWER", ("glob",)),
     ("所有宗教都按本教算", "RELOWN", 0, 5, "RETTRUE", ("glob",)),
     ("认可所有文化", "CULTACC", 0, 5, "RETTRUE", ("glob",)),
     ("省份没有非认可文化/同文化组惩罚", "CULTMOD", 0x4E, 11, "CULTSKIP", ("glob", "cultskip")),
@@ -721,6 +753,12 @@ def resolve(img):
         pe = struct.unpack_from("<I", img.data, 0x3C)[0]
         image_base = struct.unpack_from("<Q", img.data, pe + 24 + 24)[0]
         R["blockiter"] = struct.unpack("<Q", img.bytes_at(R.pop("@blockvt") + 0x78, 8))[0] - image_base
+    # 外交关系占不占名额：挂钩处 +0x44 是原版“皇帝的帝国诸侯不占”返回否的 xor al,al; jmp
+    e = R.get("entry:玩家的属国不占外交关系(同撤销上诉特权后的帝国诸侯)")
+    if e is not None and img.bytes_at(e + 0x44, 3) == b"\x32\xc0\xe9":
+        R["slotno"] = e + 0x44
+    elif e is not None:
+        problems.append("外交关系名额函数: 结构不符")
     # 平均触发时间概率函数(MTTHCHANCE)：+0x17 call 算概率的函数，+0x1C 是之后的 movsxd r10,[rbx+0x850]
     e = R.get("entry:平均触发时间：玩家的事件最多 5 年")
     if e is not None and img.bytes_at(e + 0x17, 1) == b"\xe8" and img.bytes_at(e + 0x1C, 7) == bytes.fromhex("4c639350080000"):
@@ -909,7 +947,10 @@ def main():
         log(f"已启动游戏: {game_cmd[0]}")
         return
     if args.watch:
-        watch(args.wait_game, args.restart_wait)
+        try:
+            watch(args.wait_game, args.restart_wait)
+        except Exception:
+            log("守候进程出错退出:\n" + traceback.format_exc())
         return
     a = attach(args.wait_game)
     if not a:
@@ -928,13 +969,26 @@ def watch(wait_first, restart_wait):
         log("已有守候进程在运行，本进程退出")
         return
     timeout = wait_first
+    errors = 0
     while True:
         a = attach(timeout)
         if not a:
             log("没有等到 eu4.exe 启动，守候结束")
             return
         h, base, img, pid = a
-        res = install_all(h, base, img)
+        try:
+            res = install_all(h, base, img)
+        except Exception:
+            # 游戏刚启动时读写内存偶尔会失败：记下原因，过几秒对同一个进程再装(已装上的会跳过)
+            errors += 1
+            log(f"装补丁出错(第 {errors} 次，pid {pid}):\n" + traceback.format_exc())
+            if errors >= 10:
+                log("连续出错，守候结束")
+                return
+            time.sleep(3)
+            timeout = 30
+            continue
+        errors = 0
         log(f"补丁结果 (pid {pid}): " + "；".join(f"{n}:{r}" for n, r in res))
         P.wait_exit(h)
         log(f"eu4.exe (pid {pid}) 已退出，等待游戏重新启动")
