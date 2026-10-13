@@ -28,6 +28,7 @@
    - 随机池(on_actions 的 random_events)：照原版抽，抽中发给玩家的坏事件，就在同一个池子当时符合条件的好事件里
      按权重重抽一个，“出不出事件”的概率和原版一样。池里一个好事件都没有时这次什么都不发生。
    - 国家/省份平均触发时间(mean_time_to_happen)的事件：照原版掷骰，掷中的是发给玩家的坏事件就不发生(不替换)。
+     玩家的事件平均触发时间最多 5 年(算上修正后超过 5 年的按 5 年算，短于 5 年的照原版)。
    - 被别的事件/决议直接调用的连锁事件、延迟事件、on_action 固定事件不动。AI 不受影响。
 7. 相容所有宗教和文化：
    - 宗教：所有宗教对玩家都按本教算(引擎“是否本教”判断 0x36e300)，容忍度一律用本教容忍度，没有异端/异教的
@@ -375,6 +376,11 @@ SIGS = {
         "85 F6 7E ?? 8B C1 4D 8B 0C C0 2B 14 83 78 ?? FF C1 3B CE 7C ?? EB ?? 4C 8B CF 48 8B 5C 24 70 4C "
         "8B 45 88 49 8B F9 4D 85 C0 74 ?? 48 8B 44 24 58 49 2B C0 48 C1 F8 03"
     ),
+    # 平均触发时间的本次触发概率(rcx 事件, rdx 作用域, r8d 检查间隔天数；百万分之一)：+0x17 call 算概率(事件 +0x7A8)，之后按国家大小缩放
+    "MTTHCHANCE": (
+        "48 89 5C 24 08 57 48 83 EC 20 48 8B D9 48 8B FA 48 81 C1 A8 07 00 00 E8 ?? ?? ?? ?? 4C 63 93 50 "
+        "08 00 00 44 8B C0 45 85 D2 0F 8E ?? ?? ?? ??"
+    ),
     # 国家平均触发时间回调(每个事件一次)：+0x5E 已触发过、+0xC6 掷骰、+0x152 能否触发、+0x16D 放进国家待触发列表([rbp+0x28] 事件，[rdi+0x10] 作用域)
     "MTTHLAMBDA": (
         "48 89 5C 24 08 44 89 44 24 18 48 89 54 24 10 55 56 57 48 8B EC 48 83 EC 70 48 8B DA 48 8B F9 48 "
@@ -594,6 +600,16 @@ CAVES = {
         "90681e00004889d148c1e93884c974144889d148c1e93080f907740848c1ea20440fb7d2c34889d148c1e93884"
         "c9740948c1ea20664439d2c380c901c3"
     ),
+    "MTTHCAP": (
+        "00000000000000000000000000000000000000000000000048895c2408574883ec204889cb4889d74489442440"
+        "e85600000089442438488d8ba80700004889fa448b442440ff15bdffffff837c243800743089c18b44244085c0"
+        "7e2469c040420f0031d241b82107000041f7f03d40420f007605b840420f0039c10f4fc1eb0289c8ff2588ffff"
+        "ff4989d1e86700000031c04983faff745e4d85c97459498d412c4180794b007404498d4144488b1031c04889d1"
+        "48c1e93884c9752f496349284885c978314869c9102e0000488b052dffffff488b004885c0741b480388a81c00"
+        "00488b916804000031c0e85d0000000f94c00fb6c0c349c7c2ffffffff488b05fbfeffff488b004885c0743f48"
+        "8b90601e000080b8661e000007751080b86f1e0000007407488b90681e00004889d148c1e93884c974144889d1"
+        "48c1e93080f907740848c1ea20440fb7d2c34889d148c1e93884c9740948c1ea20664439d2c380c901c3"
+    ),
 }
 
 # (名称, 特征码键, 挂钩处相对命中处的偏移, 被搬走的原指令长度, 机器码键, 数据区各项)
@@ -615,6 +631,7 @@ HOOKS = (
     ("玩家部队无损耗", "ATTRITION", 0, 5, "ATTR", ("glob",)),
     ("随机池：抽中坏事件就在同池好事件里重抽", "POOLPICK", 0x2B, 5, "POOLPICK",
      ("glob", "optip", "strfree", "heirvt", "blockiter", "@evstats")),
+    ("平均触发时间：玩家的事件最多 5 年", "MTTHCHANCE", 0, 5, "MTTHCAP", ("glob", "mtthfn", "mtthback")),
     ("国家平均触发时间：坏事件不发生", "MTTHLAMBDA", 0x16D, 11, "CMTTHBLOCK",
      ("glob", "optip", "strfree", "cskip", "heirvt", "blockiter", "@evstats")),
     ("省份平均触发时间：坏事件不发生", "PMTTHFN", 0x3A3, 7, "PMTTHBLOCK",
@@ -704,6 +721,13 @@ def resolve(img):
         pe = struct.unpack_from("<I", img.data, 0x3C)[0]
         image_base = struct.unpack_from("<Q", img.data, pe + 24 + 24)[0]
         R["blockiter"] = struct.unpack("<Q", img.bytes_at(R.pop("@blockvt") + 0x78, 8))[0] - image_base
+    # 平均触发时间概率函数(MTTHCHANCE)：+0x17 call 算概率的函数，+0x1C 是之后的 movsxd r10,[rbx+0x850]
+    e = R.get("entry:平均触发时间：玩家的事件最多 5 年")
+    if e is not None and img.bytes_at(e + 0x17, 1) == b"\xe8" and img.bytes_at(e + 0x1C, 7) == bytes.fromhex("4c639350080000"):
+        R["mtthfn"] = rel_target(img, e + 0x17, 1, 5)
+        R["mtthback"] = e + 0x1C
+    elif e is not None:
+        problems.append("平均触发时间概率函数: 结构不符")
     # 平均触发时间的事件放进待触发列表之后的位置(坏事件不放时跳过去)：国家回调(MTTHLAMBDA) +0x181，
     # 省份函数(PMTTHFN) +0x428
     e = R.get("entry:国家平均触发时间：坏事件不发生")
