@@ -55,36 +55,6 @@ on_monthly_pulse = {
 	}
 }
 
-# root = location, from = losing country
-# an AI country on the player's side of the same war against FROM takes the province -> the player controls it
-# (in every_country PREV = the sieger: the player is in a war where the sieger and FROM are on opposite sides,
-#  and the player is not at war with the sieger -> same side of the same war)
-on_siege_won_province = {
-	controller = {
-		if = {
-			limit = { ai = yes }
-			every_country = {
-				limit = {
-					ai = no
-					NOT = { war_with = PREV }
-					OR = {
-						is_in_war = {
-							attackers = PREV
-							defenders = FROM
-						}
-						is_in_war = {
-							defenders = PREV
-							attackers = FROM
-						}
-					}
-				}
-				save_event_target_as = buff_player
-				ROOT = { change_controller = event_target:buff_player }
-			}
-		}
-	}
-}
-
 # root = location, from = winner country
 on_battle_lost_province = {
 	if = { 
