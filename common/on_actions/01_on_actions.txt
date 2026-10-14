@@ -20,24 +20,22 @@ on_startup = {
 		set_estate_privilege = estate_burghers_admirals
 		
 		change_estate_land_share = { estate = all share = -100 }
-		save_global_event_target_as = player
 	}
 }
 
-on_war_won = {
+# root = province, from = old owner
+on_province_owner_change = {
 	if = {
-		limit = { ai = no }
-		every_owned_province = {
-			if = {
-				limit = { NOT = { is_core = ROOT } }
-				add_territorial_core = ROOT
-			}
-			change_religion = ROOT
-			set_local_autonomy = 0
-			add_nationalism = -30
-			add_devastation = -100
-			clear_rebels = yes
+		limit = { owner = { ai = no } }
+		owner = { save_event_target_as = buff_new_owner }
+		if = {
+			limit = { NOT = { is_core = event_target:buff_new_owner } }
+			add_territorial_core = event_target:buff_new_owner
 		}
+		set_local_autonomy = 0
+		add_nationalism = -30
+		add_devastation = -100
+		clear_rebels = yes
 	}
 }
 
@@ -58,16 +56,21 @@ on_monthly_pulse = {
 }
 
 # root = location, from = losing country
+# an AI country fighting FROM on the player's side (ally or subject) takes the province -> the player controls it
 on_siege_won_province = {
-	if = { 
+	controller = { save_event_target_as = buff_sieger }
+	every_country = {
 		limit = {
-			controller = {
-				is_in_war = { attacker_leader = event_target:player }
-				NOT = { war_with = event_target:player }
+			ai = no
+			war_with = FROM
+			event_target:buff_sieger = {
+				ai = yes
+				war_with = FROM
+				NOT = { war_with = PREV }
 			}
-			owner = { war_with = event_target:player }
 		}
-		change_controller = event_target:player
+		save_event_target_as = buff_player
+		ROOT = { change_controller = event_target:buff_player }
 	}
 }
 
