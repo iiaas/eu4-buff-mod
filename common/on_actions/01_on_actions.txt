@@ -60,9 +60,11 @@ on_colony_finished = {
 	owner = {
 		if = {
 			limit = { ai = no }
+			log = "buff: colony finished [Root.GetName]"
 			ROOT = {
 				every_neighbor_province = {
 					limit = { is_empty = yes }
+					log = "buff: siberian frontier in [This.GetName]"
 					add_siberian_construction = 400
 				}
 			}
