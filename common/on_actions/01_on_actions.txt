@@ -57,10 +57,16 @@ on_monthly_pulse = {
 
 # root = province: the player's colony is finished -> Siberian frontiers in the empty neighbouring provinces
 on_colony_finished = {
-	if = {
-		limit = { owner = { ai = no } }
-		save_event_target_as = buff_finished_colony
-		owner = { country_event = { id = buff_colony.1 } }
+	owner = {
+		if = {
+			limit = { ai = no }
+			ROOT = {
+				every_neighbor_province = {
+					limit = { is_empty = yes }
+					add_siberian_construction = 400
+				}
+			}
+		}
 	}
 }
 
