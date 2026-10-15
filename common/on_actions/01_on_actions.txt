@@ -55,6 +55,15 @@ on_monthly_pulse = {
 	}
 }
 
+# root = province: the player's colony is finished -> Siberian frontiers in the empty neighbouring provinces
+on_colony_finished = {
+	if = {
+		limit = { owner = { ai = no } }
+		save_event_target_as = buff_finished_colony
+		owner = { country_event = { id = buff_colony.1 } }
+	}
+}
+
 # root = location, from = winner country
 on_battle_lost_province = {
 	if = { 
