@@ -48,6 +48,9 @@
 11. 相容所有宗教和文化：
    - 宗教：所有宗教对玩家都按本教算(引擎“是否本教”判断 0x36e300)，容忍度一律用本教容忍度，没有异端/异教的
      不满等惩罚；传教士也不会再去改宗(都算本教)。
+   - 国教：玩家有的宗教(有省份是这个宗教)都按国教算：脚本触发器 religion = X(国家作用域)在 X 是国教或玩家有
+     X 宗教的省份时为真；religion_group = G(国家作用域)在国教属于 G 或玩家有宗教属于 G 的省份时为真；
+     has_owner_religion 对玩家的省份按“是主人国教”算(= no 时为假)。用于成立国家等决议、任务、事件的条件。
    - 融合宗教(同腾格里)：脚本触发器 secondary_religion / secondary_religion_group 对玩家一律为真，
      相当于所有宗教都是玩家的融合宗教；伟大工程(如天房)等“国教或融合宗教”的条件因此都满足。
    - 文化：玩家认可所有文化(“是否认可文化”判断 0x2fc3e0，触发器等用它)，玩家省份不加“非认可文化”
@@ -492,6 +495,17 @@ SIGS = {
         "?? ?? ?? ?? 48 63 C2 48 8D 15 ?? ?? ?? ?? 0F B6 84 02 ?? ?? ?? ?? 8B 8C 82 ?? ?? ?? ?? 48 03 CA "
         "FF E1"
     ),
+    # 触发器 religion 的判断函数(+0x68 模式：0 自动/1 国家/2 省份；r8 目标宗教)：+0x95 国家分支比较国教 [国家+0xF30]
+    "RELIG": (
+        "48 89 5C 24 08 57 48 83 EC 20 48 8B D9 48 8B FA 48 83 C1 70 E8 ?? ?? ?? ?? 8B 53 68 4C 8B C0 B8 "
+        "44 00 00 00 44 8D 48 E8 85 D2 75 ?? 39 57 28 75 ?? 38 57 4B 8B C8 41 0F 44 C9 48 8B 0C 39 48 C1 "
+        "E9 38 84 C9 75 ?? 83 FA 02 75 ??"
+    ),
+    # 触发器 religion_group 的判断函数：+0x67 国家分支取国教 [国家+0xF30]，之后比较宗教 +0xD8(所属组)
+    "RELGRP": (
+        "40 53 48 83 EC 20 48 83 C1 68 48 8B DA E8 ?? ?? ?? ?? 48 63 4B 28 4C 8B C8 85 C9 74 ?? 4C 69 C1 "
+        "10 2E 00 00 48 8B 0D ?? ?? ?? ?? 48 8B 91 A8 1C 00 00 49 8B 8C 10 48 04 00 00 EB ??"
+    ),
     # 省份文化修正(rdi 上下文：+0x18 所有者，+0x20 省份)：+0x4E 处判断认可文化，不认可时加同文化组/非认可文化修正
     "CULTMOD": (
         "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 48 83 EC 20 48 8B 41 20 48 8B F9 48 8B 31 48 83 "
@@ -883,6 +897,30 @@ CAVES = {
         "8b90601e000080b8661e000007751080b86f1e0000007407488b90681e00004889d148c1e93884c974144889d1"
         "48c1e93080f907740848c1ea20440fb7d2c3"
     ),
+    "RELC": (
+        "00000000000000000000000000000000488b04d14989d150e8bd000000584989c34983faff742b4d39d175264d"
+        "3983300f00007414e8280000004885c0750a4883fc00ff25bfffffff4839c0ff25b6ffffff4c89d84c3980300f"
+        "0000ff25a6ffffff488b0597ffffff488b004885c07466488b88981c0000482b88901c000048c1f903488b90a8"
+        "1c00004885d2744849c7c1010000004939c9733c4d69d9102e00004901d3498b836804000048c1e83884c0741d"
+        "498b836804000048c1e820664439d0750c498b83480400004c39c0740549ffc1ebc0c331c0c349c7c2ffffffff"
+        "488b0518ffffff488b004885c0743f488b90601e000080b8661e000007751080b86f1e0000007407488b90681e"
+        "00004889d148c1e93884c974144889d148c1e93080f907740848c1ea20440fb7d2c3"
+    ),
+    "RGROUPC": (
+        "00000000000000000000000000000000488b04d1488b88300f00005152e8b10000005a594983faff74224c39d2"
+        "751d4885c974094c3989d8000000740f51e80f000000594885c074034889c1ff25b6ffffff488b05a7ffffff48"
+        "8b004885c0746f488b88981c0000482b88901c000048c1f903488b90a81c00004885d2745149c7c00100000049"
+        "39c873454d69d8102e00004901d3498b836804000048c1e83884c07426498b836804000048c1e820664439d075"
+        "15498b83480400004885c074094c3988d8000000740549ffc0ebb7c331c0c349c7c2ffffffff488b051fffffff"
+        "488b004885c0743f488b90601e000080b8661e000007751080b86f1e0000007407488b90681e00004889d148c1"
+        "e93884c974144889d148c1e93080f907740848c1ea20440fb7d2c3"
+    ),
+    "OWNRC": (
+        "00000000000000000000000000000000488b88300f000051524150e82300000041585a594983faff740c4c39d2"
+        "7507498b884804000049398848040000ff25c5ffffff49c7c2ffffffff488b05afffffff488b004885c0743f48"
+        "8b90601e000080b8661e000007751080b86f1e0000007407488b90681e00004889d148c1e93884c974144889d1"
+        "48c1e93080f907740848c1ea20440fb7d2c3"
+    ),
 }
 
 # (名称, 特征码键, 挂钩处相对命中处的偏移, 被搬走的原指令长度, 机器码键, 数据区各项)
@@ -929,6 +967,9 @@ HOOKS = (
     ("有的文化算主文化(primary_culture)", "PRIMCULT", 0x38B, 11, "PRIMC", ("glob", "primback")),
     ("有的文化算主文化(culture_group)", "CULTGRP", 0x63, 11, "GROUPC", ("glob", "grpback")),
     ("有的文化算主文化(has_owner_culture)", "@OWNCULT", 0, 14, "OWNC", ("glob", "ownback")),
+    ("有的宗教算国教(religion)", "RELIG", 0x95, 11, "RELC", ("glob", "relback")),
+    ("有的宗教算国教(religion_group)", "RELGRP", 0x67, 11, "RGROUPC", ("glob", "rgrpback")),
+    ("有的宗教算国教(has_owner_religion)", "@OWNREL", 0, 14, "OWNRC", ("glob", "ownrback")),
     ("省份没有非认可文化/同文化组惩罚", "CULTMOD", 0x4E, 11, "CULTSKIP", ("glob", "cultskip")),
     ("省份界面文化名显示为认可(绿色)", "CULTUI", 0x110, 5, "CULTCOLOR", ("glob",)),
 )
@@ -1094,6 +1135,14 @@ def resolve(img):
         R["ownback"] = ev + 0x31C + 14
     else:
         problems.append("has_owner_culture: 找不到")
+    # has_owner_religion：同一段跳转表里令牌 0x2BD6，判断函数结构同 has_owner_culture(挂钩处也在 +0x31C)
+    v = trig_vtable(img, "OWNSWITCH", 0x2BD6)
+    if v is not None:
+        ev = struct.unpack("<Q", img.bytes_at(v + 0x30, 8))[0] - pe_image_base(img)
+        R["entry:有的宗教算国教(has_owner_religion)"] = ev + 0x31C
+        R["ownrback"] = ev + 0x31C + 14
+    else:
+        problems.append("has_owner_religion: 找不到")
     # primary_culture / culture_group 挂钩处之后跳回的位置
     e = R.get("entry:有的文化算主文化(primary_culture)")
     if e is not None:
@@ -1101,6 +1150,12 @@ def resolve(img):
     e = R.get("entry:有的文化算主文化(culture_group)")
     if e is not None:
         R["grpback"] = e + 11
+    e = R.get("entry:有的宗教算国教(religion)")
+    if e is not None:
+        R["relback"] = e + 11
+    e = R.get("entry:有的宗教算国教(religion_group)")
+    if e is not None:
+        R["rgrpback"] = e + 11
     # 外交关系占不占名额：挂钩处 +0x44 是原版“皇帝的帝国诸侯不占”返回否的 xor al,al; jmp
     e = R.get("entry:玩家的属国不占外交关系(同撤销上诉特权后的帝国诸侯)")
     if e is not None and img.bytes_at(e + 0x44, 3) == b"\x32\xc0\xe9":
