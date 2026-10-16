@@ -52,6 +52,8 @@
      相当于所有宗教都是玩家的融合宗教；伟大工程(如天房)等“国教或融合宗教”的条件因此都满足。
    - 文化：玩家认可所有文化(“是否认可文化”判断 0x2fc3e0，触发器等用它)，玩家省份不加“非认可文化”
      “同文化组”修正(税收、人力、不满)；文化自身的修正照常。省份界面里玩家省份的文化名也按认可文化显示(绿色)。
+   - 主文化：脚本触发器 primary_culture(国家主文化是否为某文化)、has_owner_culture(省份文化是否为主人主文化)
+     对玩家一律为真，所有文化都按主文化算(任务、事件、决议、伟大工程等条件)。
 12. 特质：玩家的统治者、继承人、配偶随机获得特质时只出好特质(按原版权重在好特质里挑)。好坏按颜色：特质的
    每一项修正在界面上都是绿色(游戏修正定义里“正值是好处”的标志和数值正负一致)才算好特质；有红色的不出。
    能选的特质里一个好的都没有时照原版挑。事件/决议直接指定的特质不受影响。
@@ -472,6 +474,18 @@ SIGS = {
         "48 89 5C 24 08 57 48 83 EC 20 48 8B DA 48 8B F9 E8 ?? ?? ?? ?? 48 39 83 88 00 00 00 74 ?? 48 3B "
         "9F 28 12 00 00 75 ?? B0 01 48 8B 5C 24 30 48 83 C4 20 5F C3 48 8B 87 30 12 00 00 48 85 C0 74 ??"
     ),
+    # 触发器 primary_culture 的判断函数(rcx 触发器, rdx 作用域)
+    "PRIMCULT": (
+        "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 4C 89 74 24 20 55 48 8D 6C 24 80 48 81 EC 80 01 00 "
+        "00 48 8B DA 48 8B F1 BF 44 00 00 00 44 8D 77 E8 83 7A 28 00 0F 85 ?? ?? ?? ?? 8B C7 80 7A 4B 00 "
+        "41 0F 44 C6 48 8B 04 10 48 C1 E8 38 84 C0 0F 85 ?? ?? ?? ??"
+    ),
+    # 条件工厂里令牌 0x2B4B 起的跳转表分支(含 has_owner_culture 0x2BD7)：+0x14 起始令牌(取负)，+0x32 字节表，+0x39 偏移表
+    "OWNSWITCH": (
+        "81 FA F7 2C 00 00 0F 8F ?? ?? ?? ?? 0F 84 ?? ?? ?? ?? 81 C2 B5 D4 FF FF 81 FA A6 01 00 00 0F 87 "
+        "?? ?? ?? ?? 48 63 C2 48 8D 15 ?? ?? ?? ?? 0F B6 84 02 ?? ?? ?? ?? 8B 8C 82 ?? ?? ?? ?? 48 03 CA "
+        "FF E1"
+    ),
     # 省份文化修正(rdi 上下文：+0x18 所有者，+0x20 省份)：+0x4E 处判断认可文化，不认可时加同文化组/非认可文化修正
     "CULTMOD": (
         "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 48 83 EC 20 48 8B 41 20 48 8B F9 48 8B 31 48 83 "
@@ -882,6 +896,8 @@ HOOKS = (
     ("所有宗教都算融合宗教(secondary_religion)", "SECREL", 0, 6, "RETSCOPE", ("glob",)),
     ("所有宗教组都算融合宗教(secondary_religion_group)", "SECRELGRP", 0, 6, "RETSCOPE", ("glob",)),
     ("认可所有文化", "CULTACC", 0, 5, "RETTRUE", ("glob",)),
+    ("所有文化都算主文化(primary_culture)", "PRIMCULT", 0, 5, "RETSCOPE", ("glob",)),
+    ("玩家省份都算主人主文化(has_owner_culture)", "@OWNCULT", 0, 5, "RETSCOPE", ("glob",)),
     ("省份没有非认可文化/同文化组惩罚", "CULTMOD", 0x4E, 11, "CULTSKIP", ("glob", "cultskip")),
     ("省份界面文化名显示为认可(绿色)", "CULTUI", 0x110, 5, "CULTCOLOR", ("glob",)),
 )
@@ -916,6 +932,34 @@ def rel_target(img, insn_rva, disp_off, insn_len):
     return insn_rva + insn_len + struct.unpack("<i", img.bytes_at(insn_rva + disp_off, 4))[0]
 
 
+def trig_vtable(img, sigkey, tok):
+    """条件工厂里按令牌跳转的一段(特征码 sigkey：+0x14 add edx,-起始令牌，+0x1A cmp edx,最大序号，+0x32 字节表，
+    +0x39 偏移表，表里是相对映像的偏移)：令牌 tok 的分支是 lea rcx,[rbp+0x30]; call 构造函数，构造函数里第一个
+    lea rax,[rip+X]; mov [rbx],rax 的 X 是这个条件类的虚表(rva)。找不到返回 None。"""
+    hits = img.find_sig(SIGS[sigkey])
+    if len(hits) != 1:
+        return None
+    h = hits[0]
+    lo = -struct.unpack("<i", img.bytes_at(h + 0x14, 4))[0]
+    hi = struct.unpack("<I", img.bytes_at(h + 0x1A, 4))[0]
+    btab = struct.unpack("<I", img.bytes_at(h + 0x32, 4))[0]
+    dtab = struct.unpack("<I", img.bytes_at(h + 0x39, 4))[0]
+    i = tok - lo
+    if not 0 <= i <= hi:
+        return None
+    case = struct.unpack("<I", img.bytes_at(dtab + 4 * img.bytes_at(btab + i, 1)[0], 4))[0]
+    if img.bytes_at(case, 5) != b"\x48\x8d\x4d\x30\xe8":
+        return None
+    ctor = rel_target(img, case + 4, 1, 5)
+    j = re.search(rb"\x48\x8d\x05(....)\x48\x89\x03", img.bytes_at(ctor, 0x100), re.S)
+    return rel_target(img, ctor + j.start(), 3, 7) if j else None
+
+
+def pe_image_base(img):
+    pe = struct.unpack_from("<I", img.data, 0x3C)[0]
+    return struct.unpack_from("<Q", img.data, pe + 24 + 24)[0]
+
+
 def resolve(img):
     """用特征码解析出挂钩位置和机器码要用的全局变量/函数。返回 (表, 问题列表)。"""
     R, problems = {}, []
@@ -932,6 +976,8 @@ def resolve(img):
     else:
         problems.append("战斗骰子面数: 特征码未命中或不唯一")
     for name, sk, off, pro_len, cave, keys in HOOKS:
+        if sk.startswith("@"):
+            continue
         hits = img.find_sig(SIGS[sk])
         if len(hits) != 1:
             problems.append(f"{name}: 特征码{'未命中' if not hits else '命中 %d 处(不唯一)' % len(hits)}")
@@ -976,25 +1022,10 @@ def resolve(img):
     # 条件 tag / OR / AND 的虚表：条件工厂里令牌 0x2965 起的跳转表(特征码 TRIGSWITCH：add edx,-0x2965 后
     # movzx eax,[基址+rax+字节表]、mov ecx,[基址+rax*4+偏移表]，表里是相对映像的偏移)；对应分支是
     # lea rcx,[rbp+0x30]; call 构造函数，构造函数里第一个 lea rax,[rip+X]; mov [rbx],rax 的 X 就是虚表
-    hits = img.find_sig(SIGS["TRIGSWITCH"])
-    if len(hits) == 1:
-        h = hits[0]
-        lo = -struct.unpack("<i", img.bytes_at(h + 0x14, 4))[0]
-        hi = struct.unpack("<I", img.bytes_at(h + 0x1A, 4))[0]
-        btab = struct.unpack("<I", img.bytes_at(h + 0x32, 4))[0]
-        dtab = struct.unpack("<I", img.bytes_at(h + 0x39, 4))[0]
-        for k, tok in (("tagvt", 0x2A05), ("orvt", 0x296C), ("andvt", 0x296B)):
-            i = tok - lo
-            if not 0 <= i <= hi:
-                continue
-            case = struct.unpack("<I", img.bytes_at(dtab + 4 * img.bytes_at(btab + i, 1)[0], 4))[0]
-            if img.bytes_at(case, 5) != b"\x48\x8d\x4d\x30\xe8":
-                continue
-            ctor = rel_target(img, case + 4, 1, 5)
-            body = img.bytes_at(ctor, 0x100)
-            j = re.search(rb"\x48\x8d\x05(....)\x48\x89\x03", body, re.S)
-            if j:
-                R[k] = rel_target(img, ctor + j.start(), 3, 7)
+    for k, tok in (("tagvt", 0x2A05), ("orvt", 0x296C), ("andvt", 0x296B)):
+        v = trig_vtable(img, "TRIGSWITCH", tok)
+        if v is not None:
+            R[k] = v
     for k in ("tagvt", "orvt", "andvt"):
         if k not in R:
             problems.append(f"{k}: 找不到(国家专属事件不拦截失效)")
@@ -1023,6 +1054,13 @@ def resolve(img):
         R["goodsback2"] = e + 0x47
     elif e is not None:
         problems.append("殖民地商品(成长时): 结构不符")
+    # has_owner_culture 的判断函数：条件工厂里令牌 0x2BD7(has_owner_culture) 那段跳转表(特征码 OWNSWITCH)解出虚表，
+    # 判断函数在虚表 +0x30(这类条件函数开头都是同样的报错代码，按特征码找不唯一)
+    v = trig_vtable(img, "OWNSWITCH", 0x2BD7)
+    if v is not None:
+        R["entry:玩家省份都算主人主文化(has_owner_culture)"] = struct.unpack("<Q", img.bytes_at(v + 0x30, 8))[0] - pe_image_base(img)
+    else:
+        problems.append("has_owner_culture: 找不到")
     # 外交关系占不占名额：挂钩处 +0x44 是原版“皇帝的帝国诸侯不占”返回否的 xor al,al; jmp
     e = R.get("entry:玩家的属国不占外交关系(同撤销上诉特权后的帝国诸侯)")
     if e is not None and img.bytes_at(e + 0x44, 3) == b"\x32\xc0\xe9":
