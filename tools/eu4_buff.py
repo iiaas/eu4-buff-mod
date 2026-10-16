@@ -78,6 +78,21 @@
      所以其他脚本里的 ironman 判断也会受影响。
    - 难度、AI 难度、幸运国家、开局设置、多人游戏、指定国家等其他成就条件不变。
 
+脚本条件(trigger)修改一览
+------------------------
+作用域是玩家国家(或玩家的省份)时：
+  始终为真
+    secondary_religion = X / secondary_religion_group = G     所有宗教都是融合宗教(同腾格里)
+    accepted_culture = X / has_owner_accepted_culture         所有文化都是认可文化(引擎“是否认可文化”恒为是)
+    ironman = yes                                             对所有人(成就)
+  玩家有就为真(拥有该宗教/文化的省份，或本来就是国教/主文化)
+    religion = X / religion_group = G                         国家作用域
+    primary_culture = X / culture_group = G                   国家作用域
+  玩家的省份为真(写 = no 时为假)
+    has_owner_religion / has_owner_culture
+  另外引擎“某宗教是否本教”对玩家恒为是(宽容度、异端不满、传教士用它，不是脚本条件)。
+  省份作用域的 religion / culture 等(看省份自己)和 AI 一律照原版。
+
 兼容性
 ------
 - 适用版本：1.37.5.0(EU4 已停止更新)。
