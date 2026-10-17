@@ -62,8 +62,9 @@
    - 主文化：玩家有的文化(有省份是这个文化)都按主文化算：脚本触发器 primary_culture = X(国家作用域)在 X 是主文化
      或玩家有 X 文化的省份时为真；culture_group = G(国家作用域)在主文化属于 G 或玩家有文化属于 G 的省份时为真；
      has_owner_culture 对玩家的省份按“是主人主文化”算(= no 时为假)。
-   - 科技：脚本触发器 adm_tech / dip_tech / mil_tech 对玩家一律为真(如成立德国要求的行政科技 18)。
-   - 上面国教、主文化、科技这三项只在决议的条件里生效(决议界面、可用决议提示、执行决议)，用来成立国家等；
+   - 科技：脚本触发器 adm_tech / dip_tech / mil_tech 对玩家一律为真(所有地方：决议、事件、任务等；
+     如成立德国要求的行政科技 18)。
+   - 上面国教、主文化这两项只在决议的条件里生效(决议界面、可用决议提示、执行决议)，用来成立国家等；
      君主称号、事件(选项、触发条件)、任务等其他地方照原版只看国教和主文化，称号和事件里的名字都正常。
 12. 特质：玩家的统治者、继承人、配偶随机获得特质时只出好特质(按原版权重在好特质里挑)。好坏按颜色：特质的
    每一项修正在界面上都是绿色(游戏修正定义里“正值是好处”的标志和数值正负一致)才算好特质；有红色的不出。
@@ -90,9 +91,8 @@
 作用域是玩家国家(或玩家的省份)时：
   始终为真
     secondary_religion = X / secondary_religion_group = G     所有宗教都是融合宗教(同腾格里)
+    adm_tech / dip_tech / mil_tech = N                        科技等级(所有地方)
     ironman = yes                                             对所有人(成就)
-  始终为真，只在决议的条件里(其他地方照原版)
-    adm_tech / dip_tech / mil_tech = N                        科技等级
   玩家有就为真(拥有该宗教/文化的省份，或本来就是国教/主文化)；只在决议的条件里，其他地方照原版
     religion = X / religion_group = G                         国家作用域
     primary_culture = X / culture_group = G                   国家作用域
@@ -1064,14 +1064,10 @@ CAVES = {
         "48c1e93080f907740848c1ea20440fb7d2c3"
     ),
     "TECHC": (
-        "000000000000000000000000000000000000000000000000000000000000000052e89a0000005a4983faff7432"
-        "b844000000b92c000000807f4b000f44c1488b04384889c148c1e93884c9741248c1e820664439d07508b001ff"
-        "25a9ffffff39d60f9dc0ff259effffff49c7c2ffffffff488b0588ffffff488b004885c0743f488b90601e0000"
-        "80b8661e000007751080b86f1e0000007407488b90681e00004889d148c1e93884c974144889d148c1e93080f9"
-        "07740848c1ea20440fb7d2c3e8a5ffffff4983faff740ee80a000000750749c7c2ffffffffc3535657488d7424"
-        "1865488b3c2508000000488d86001800004839f8480f42f8488b1d18ffffff4885db74434839fe733e488b0648"
-        "2b05fcfeffff4889c148c1e920751e488b0b488d53084885c974123b0272053b4204720f4883c20848ffc9ebe9"
-        "4883c608ebc4b801000000eb0231c05f5e5b85c0c3"
+        "0000000000000000000000000000000052e8440000005a4983faff7432b844000000b92c000000807f4b000f44"
+        "c1488b04384889c148c1e93884c9741248c1e820664439d07508b001ff25b9ffffff39d60f9dc0ff25aeffffff"
+        "49c7c2ffffffff488b0598ffffff488b004885c0743f488b90601e000080b8661e000007751080b86f1e000000"
+        "7407488b90681e00004889d148c1e93884c974144889d148c1e93080f907740848c1ea20440fb7d2c3"
     ),
 }
 
@@ -1121,7 +1117,7 @@ HOOKS = (
     ("有的宗教算国教(religion)", "RELIG", 0x95, 11, "RELC", ("glob", "relback", "imgbase", "@decfns")),
     ("有的宗教算国教(religion_group)", "RELGRP", 0x67, 11, "RGROUPC", ("glob", "rgrpback", "imgbase", "@decfns")),
     ("有的宗教算国教(has_owner_religion)", "@OWNREL", 0, 14, "OWNRC", ("glob", "ownrback", "imgbase", "@decfns")),
-    ("决议里玩家的科技条件(adm_tech 等)为真", "TECHTRIG", 0x3E, 5, "TECHC", ("glob", "techback", "imgbase", "@decfns")),
+    ("玩家的科技条件(adm_tech 等)一律为真", "TECHTRIG", 0x3E, 5, "TECHC", ("glob", "techback")),
     ("玩家始终有莫卧儿底万(同化文化)", "ASSIMGET", 0, 6, "ASSIMC", ("glob", "cmgr", "assimskip", "refmgr", "reffind", "refassim")),
     ("底万：玩家有一个省份就同化文化", "ASSIMPROC", 0x13D, 10, "ASSIMONE", ("glob", "aoneback")),
     ("底万：玩家新大陆省份的文化也同化", "CULTLIST", 0x5B, 10, "CULTLISTC", ("glob", "clret", "clkeep", "clback")),
@@ -1321,7 +1317,7 @@ def resolve(img):
     if e is not None:
         R["grpback"] = e + 11
     R["imgbase"] = 0
-    e = R.get("entry:决议里玩家的科技条件(adm_tech 等)为真")
+    e = R.get("entry:玩家的科技条件(adm_tech 等)一律为真")
     if e is not None:
         R["techback"] = e + 5
     e = R.get("entry:底万：玩家新大陆省份的文化也同化")
