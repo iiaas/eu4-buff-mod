@@ -62,7 +62,8 @@
    - 主文化：玩家有的文化(有省份是这个文化)都按主文化算：脚本触发器 primary_culture = X(国家作用域)在 X 是主文化
      或玩家有 X 文化的省份时为真；culture_group = G(国家作用域)在主文化属于 G 或玩家有文化属于 G 的省份时为真；
      has_owner_culture 对玩家的省份按“是主人主文化”算(= no 时为假)。
-   - 上面国教、主文化这两项只在决议的条件里生效(决议界面、可用决议提示、执行决议)，用来成立国家等；
+   - 科技：脚本触发器 adm_tech / dip_tech / mil_tech 对玩家一律为真(如成立德国要求的行政科技 18)。
+   - 上面国教、主文化、科技这三项只在决议的条件里生效(决议界面、可用决议提示、执行决议)，用来成立国家等；
      君主称号、事件(选项、触发条件)、任务等其他地方照原版只看国教和主文化，称号和事件里的名字都正常。
 12. 特质：玩家的统治者、继承人、配偶随机获得特质时只出好特质(按原版权重在好特质里挑)。好坏按颜色：特质的
    每一项修正在界面上都是绿色(游戏修正定义里“正值是好处”的标志和数值正负一致)才算好特质；有红色的不出。
@@ -90,6 +91,8 @@
   始终为真
     secondary_religion = X / secondary_religion_group = G     所有宗教都是融合宗教(同腾格里)
     ironman = yes                                             对所有人(成就)
+  始终为真，只在决议的条件里(其他地方照原版)
+    adm_tech / dip_tech / mil_tech = N                        科技等级
   玩家有就为真(拥有该宗教/文化的省份，或本来就是国教/主文化)；只在决议的条件里，其他地方照原版
     religion = X / religion_group = G                         国家作用域
     primary_culture = X / culture_group = G                   国家作用域
@@ -521,6 +524,12 @@ SIGS = {
     "RELGRP": (
         "40 53 48 83 EC 20 48 83 C1 68 48 8B DA E8 ?? ?? ?? ?? 48 63 4B 28 4C 8B C8 85 C9 74 ?? 4C 69 C1 "
         "10 2E 00 00 48 8B 0D ?? ?? ?? ?? 48 8B 91 A8 1C 00 00 49 8B 8C 10 48 04 00 00 EB ??"
+    ),
+    # 科技触发器(adm_tech/dip_tech/mil_tech，条件工厂按科技类别名生成)判断函数 0xc187c0 结尾：+0x3E 处 cmp esi,edx / setge al(esi 国家科技等级，edx 要求，rdi 作用域)
+    "TECHTRIG": (
+        "48 8B 85 98 00 00 00 48 C1 E8 20 48 0F BF D0 48 8B 05 ?? ?? ?? ?? 48 8B 88 18 01 00 00 48 8B 04 "
+        "D1 48 8B 90 40 24 00 00 48 8B 43 70 8B 48 50 48 8B 82 28 01 00 00 8B 14 88 EB ?? 8B 53 68 3B F2 "
+        "0F 9D C0 4C 8D 9C 24 80 01 00 00 49 8B 5B 10 49 8B 73 20 49 8B 7B 28 49 8B E3 5D C3"
     ),
     # 取政体同化文化表 0x7b30d0(rcx 政体 +0x38 改革汇总，[+0x1D0] 同化表变体)：返回 CPdxArray(+8 数据，+0x14 个数)；每月更新、文化界面、同化处理都用它
     "ASSIMGET": (
@@ -1054,6 +1063,16 @@ CAVES = {
         "8b90601e000080b8661e000007751080b86f1e0000007407488b90681e00004889d148c1e93884c974144889d1"
         "48c1e93080f907740848c1ea20440fb7d2c3"
     ),
+    "TECHC": (
+        "000000000000000000000000000000000000000000000000000000000000000052e89a0000005a4983faff7432"
+        "b844000000b92c000000807f4b000f44c1488b04384889c148c1e93884c9741248c1e820664439d07508b001ff"
+        "25a9ffffff39d60f9dc0ff259effffff49c7c2ffffffff488b0588ffffff488b004885c0743f488b90601e0000"
+        "80b8661e000007751080b86f1e0000007407488b90681e00004889d148c1e93884c974144889d148c1e93080f9"
+        "07740848c1ea20440fb7d2c3e8a5ffffff4983faff740ee80a000000750749c7c2ffffffffc3535657488d7424"
+        "1865488b3c2508000000488d86001800004839f8480f42f8488b1d18ffffff4885db74434839fe733e488b0648"
+        "2b05fcfeffff4889c148c1e920751e488b0b488d53084885c974123b0272053b4204720f4883c20848ffc9ebe9"
+        "4883c608ebc4b801000000eb0231c05f5e5b85c0c3"
+    ),
 }
 
 # (名称, 特征码键, 挂钩处相对命中处的偏移, 被搬走的原指令长度, 机器码键, 数据区各项)
@@ -1102,6 +1121,7 @@ HOOKS = (
     ("有的宗教算国教(religion)", "RELIG", 0x95, 11, "RELC", ("glob", "relback", "imgbase", "@decfns")),
     ("有的宗教算国教(religion_group)", "RELGRP", 0x67, 11, "RGROUPC", ("glob", "rgrpback", "imgbase", "@decfns")),
     ("有的宗教算国教(has_owner_religion)", "@OWNREL", 0, 14, "OWNRC", ("glob", "ownrback", "imgbase", "@decfns")),
+    ("决议里玩家的科技条件(adm_tech 等)为真", "TECHTRIG", 0x3E, 5, "TECHC", ("glob", "techback", "imgbase", "@decfns")),
     ("玩家始终有莫卧儿底万(同化文化)", "ASSIMGET", 0, 6, "ASSIMC", ("glob", "cmgr", "assimskip", "refmgr", "reffind", "refassim")),
     ("底万：玩家有一个省份就同化文化", "ASSIMPROC", 0x13D, 10, "ASSIMONE", ("glob", "aoneback")),
     ("底万：玩家新大陆省份的文化也同化", "CULTLIST", 0x5B, 10, "CULTLISTC", ("glob", "clret", "clkeep", "clback")),
@@ -1301,6 +1321,9 @@ def resolve(img):
     if e is not None:
         R["grpback"] = e + 11
     R["imgbase"] = 0
+    e = R.get("entry:决议里玩家的科技条件(adm_tech 等)为真")
+    if e is not None:
+        R["techback"] = e + 5
     e = R.get("entry:底万：玩家新大陆省份的文化也同化")
     a = R.get("entry:底万：玩家有一个省份就同化文化")
     hits = img.find_sig(SIGS["ASSIMPROC"])
