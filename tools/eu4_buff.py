@@ -476,6 +476,13 @@ SIGS = {
         "48 89 5C 24 18 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 90 00 00 00 44 0F B6 E2 48 8B F1 45 33 "
         "ED 44 89 AC 24 D8 00 00 00 88 91 8A 04 00 00 44 38 A9 74 01 00 00 75 ?? C6 81 88 04 00 00 01"
     ),
+    # 改任务命令能否执行 0x2747b0(r10 命令 +0x50 标签 +0x60 商人编号)：+0x75 起按编号找商人
+    "MERCHVALID": (
+        "48 83 EC 28 48 8B 05 ?? ?? ?? ?? 4C 8B D1 48 8B 51 50 48 C1 EA 20 48 8B 88 18 01 00 00 48 0F BF "
+        "C2 48 8B 14 C1 48 8B 82 80 14 00 00 4C 8B 40 08 41 80 78 14 01 75 ?? 49 8B 40 16 48 C1 E8 20 48 "
+        "0F BF C0 48 8B 0C C1 83 B9 64 17 00 00 00 7F ?? 83 BA 44 13 00 00 00 75 ?? 80 7A 26 07 75 ?? 4D "
+        "8B 48 20 33 C9 4D 8B 40 28 4D 2B C1 49 C1 F8 03 45 85 C0 7E ??"
+    ),
     # 殖民地确定商品 0xa03dd0(rbx 省份)：+0x98 按权重随机抽([rsp+0x30] 候选 {商品, 权重} 每项 0x10)，+0xDB 设置商品
     "GOODSROLL": (
         "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 50 0F B6 F2 48 8B D9 48 8B 89 58 04 00 00 48 85 C9 74 "
@@ -1222,6 +1229,12 @@ CAVES = {
         "751080b86f1e0000007407488b90681e00004889d148c1e93884c974144889d148c1e93080f907740848c1ea20"
         "440fb7d2c3"
     ),
+    "MVALID": (
+        "0000000000000000000000000000000041837a60ff752b51524152e82c0000004c89d0415a5a594883f8ff7415"
+        "4d8b5a5049c1eb20664139c37507b0014883c428c3458b5260ff25bcffffff49c7c2ffffffff488b05a6ffffff"
+        "488b004885c0743f488b90601e000080b8661e000007751080b86f1e0000007407488b90681e00004889d148c1"
+        "e93884c974144889d148c1e93080f907740848c1ea20440fb7d2c3"
+    ),
 }
 
 # (名称, 特征码键, 挂钩处相对命中处的偏移, 被搬走的原指令长度, 机器码键, 数据区各项)
@@ -1252,6 +1265,7 @@ HOOKS = (
     ("虚拟商人：节点窗口按有商人显示", "NODEWIN", 0xE8C, 7, "VWIN", ("glob", "vwinback")),
     ("虚拟商人：节点窗口点收集/转移", "MTOGGLE", 0, 5, "VTOGGLE", ("glob", "cmgr", "vtogcont")),
     ("虚拟商人：改任务命令直接改做法", "MERCHMISSION", 0x47, 7, "MCHANGE2", ("glob", "mchback", "mchdone", "settrader")),
+    ("虚拟商人：改任务命令能执行", "MERCHVALID", 0x75, 11, "MVALID", ("glob", "mvalback")),
     ("玩家(及属国)殖民地商品取价格最高的", "GOODSROLL", 0x98, 5, "GOODSBEST", ("glob", "goodsback", "cmgr")),
     ("玩家(及属国)殖民地商品取价格最高的(殖民地成长时)", "GOODSGROW", 0x54, 5, "GOODSBEST2", ("glob", "goodsback2", "cmgr")),
     ("玩家的将领能力点总数取最大", "LEADERGEN", 0x29, 7, "LEADERMAX", ("glob", "cmgr")),
@@ -1479,6 +1493,9 @@ def resolve(img):
     if e is not None:
         R["grpback"] = e + 11
     R["imgbase"] = 0
+    e = R.get("entry:虚拟商人：改任务命令能执行")
+    if e is not None:
+        R["mvalback"] = e + 11
     hits = img.find_sig(SIGS["SETTRADER"])
     if len(hits) == 1:
         R["settrader"] = hits[0]
