@@ -31,6 +31,10 @@ on_province_owner_change = {
 			save_event_target_as = buff_new_owner
 			add_accepted_culture = root
 		}
+		if = {
+			limit = { NOT = { is_core = event_target:buff_new_owner } }
+			add_territorial_core = event_target:buff_new_owner
+		}
 		add_core = event_target:buff_new_owner
 		set_local_autonomy = 0
 		add_nationalism = -30
