@@ -35,7 +35,6 @@ on_province_owner_change = {
 			limit = { NOT = { is_core = event_target:buff_new_owner } }
 			add_territorial_core = event_target:buff_new_owner
 		}
-		add_core = event_target:buff_new_owner
 		set_local_autonomy = 0
 		add_nationalism = -30
 		add_devastation = -100
