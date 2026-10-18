@@ -52,20 +52,12 @@ on_monthly_pulse = {
 		every_war_enemy_country = {
 			add_spy_network_from = { who = ROOT value = 100 }
 		}
-		every_owned_province = {
-			limit = { is_colony = no }
-			every_empty_neighbor_province = {
-				add_siberian_construction = 1
+		every_province = {
+			limit = {
+				owner = { OR = { tag = ROOT is_subject_of = ROOT } }
+				is_colony = no
 			}
-		}
-		every_subject_country = {
-			limit = { is_subject_of_type = colony }
-			every_owned_province = {
-				limit = { is_colony = no }
-				every_empty_neighbor_province = {
-					add_siberian_construction = 1
-				}
-			}
+			every_empty_neighbor_province = { add_siberian_construction = 1 }
 		}
 	}
 }
