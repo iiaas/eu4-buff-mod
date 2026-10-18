@@ -29,6 +29,7 @@ on_province_owner_change = {
 		limit = { owner = { ai = no } }
 		owner = { save_event_target_as = buff_new_owner }
 		add_core = event_target:buff_new_owner
+		buff_accept_province_culture = yes
 		set_local_autonomy = 0
 		add_nationalism = -30
 		add_devastation = -100
