@@ -58,6 +58,15 @@ on_monthly_pulse = {
 				add_siberian_construction = 1
 			}
 		}
+		every_subject_country = {
+			limit = { is_subject_of_type = colony }
+			every_owned_province = {
+				limit = { is_colony = no }
+				every_empty_neighbor_province = {
+					add_siberian_construction = 1
+				}
+			}
+		}
 	}
 }
 
