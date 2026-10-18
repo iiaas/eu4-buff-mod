@@ -86,9 +86,6 @@
   始终为真
     secondary_religion = X / secondary_religion_group = G     所有宗教都是融合宗教(同腾格里)
     ironman = yes                                             对所有人(成就)
-  另外引擎“某宗教是否本教”对玩家恒为是(宽容度、异端不满、传教士用它，不是脚本条件)。
-  religion / primary_culture / culture_group / adm_tech 等其他条件照原版。
-  省份作用域的 religion / culture 等(看省份自己)和 AI 一律照原版。
 
 兼容性
 ------
@@ -1528,13 +1525,13 @@ def resolve(img):
         else:
             problems.append(f"{k}: 特征码未命中")
     # 殖民地确定商品：随机抽取处(+0x98)之后，设置商品前 mov byte [rsp+0x20],1 的位置(+0xDB)
-    e = R.get("entry:玩家殖民地商品取价格最高的")
+    e = R.get("entry:玩家(及属国)殖民地商品取价格最高的")
     if e is not None and img.bytes_at(e + 0x43, 5) == bytes.fromhex("c644242001"):
         R["goodsback"] = e + 0x43
     elif e is not None:
         problems.append("殖民地商品: 结构不符")
     # 殖民地成长时确定商品：随机抽取处(+0x54)之后，设置商品前 mov byte [rsp+0x20],1 的位置(+0x9B)
-    e = R.get("entry:玩家殖民地商品取价格最高的(殖民地成长时)")
+    e = R.get("entry:玩家(及属国)殖民地商品取价格最高的(殖民地成长时)")
     if e is not None and img.bytes_at(e + 0x47, 5) == bytes.fromhex("c644242001"):
         R["goodsback2"] = e + 0x47
     elif e is not None:
@@ -1621,6 +1618,11 @@ def resolve(img):
         R["primskip"] = e - 0x3F + 0x55A
     elif e is not None:
         problems.append("改主文化检查函数: 结构不符")
+    for name, _sk, _off, _pl, _cave, keys in HOOKS:
+        if "entry:" + name in R:
+            miss = [k for k in keys if not k.startswith("@") and k not in R]
+            if miss:
+                problems.append(f"{name}: 缺少 {', '.join(miss)}")
     return R, problems
 
 
